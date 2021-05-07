@@ -50,18 +50,23 @@ class Arena:
         # all registered actors have taken their actions for this step
         for idx, actor_id in enumerate(self.order):
             # get the sorted by order mask for post-decision information for the actor
-            post_di_mask = (self.post_decision_schema[actor_id])[self.order]
+            post_decision_mask = (self.post_decision_schema[actor_id])[
+                self.order]
             # extract only the "active" information bits
-            post_di = [decision_info[x]
-                       for x in range(len(self.actors)) if post_di_mask[x]]
+            post_decision_info = [decision_info[x]
+                                  for x in range(len(self.actors)) if post_decision_mask[x]]
             # pass the post-decision information vector along with the history to the actor
             # go through the decision information vector to update history for each actor
-            self.history_mgr.update(self.actors[actor_id], post_di)
+            self.history_mgr.update(self.actors[actor_id], post_decision_info)
             # invoke learn() function for each actor
             self.actors[actor_id].learn(
                 self.history_mgr.history(self.actors[actor_id]))
 
     def register(self, actors):
+        """
+        register actors to the arena
+        initiate history managers for each actor
+        """
         for actor in self.actors:
             if not isinstance(actor, Actor):
                 raise RuntimeError("{} is not an actor.".format(actor))
@@ -71,15 +76,9 @@ class Arena:
 
     def deregister(self, actors): pass
 
-    def pre_schema(self, schema):
+    def schemata(self, pre_schema, post_schema=None, post_schema_is_identity=True):
         # each actor can indicate to observe other actors' actions
         # a valid allocation should not have any self-observations (i.e. the diagonal should be zero)
-        # assumption: the entries are ordered
-        # m[(m == 0).sum(axis=1).ravel().argsort()]
-        # arr[(arr == 0).sum(axis=1).argsort()]
-        # check lower triangular matrix
-        # np.allclose(mat, np.tril(mat)) # check if lower triangular
-        # a0: {}, a1: {}, a2: {}
         # make sure schema is of valid size
         # calculate the execution order
         # a0: 0 0 0
@@ -96,21 +95,25 @@ class Arena:
         # 4. there is no "race" between actor, which means cross diagonal values of
         #    any (non-terminal) pair of actors are not simultaneously active, np.bitwise_and(schema,schema.T).sum() == 0
 
-        schema = np.array(schema)
+        pre_schema = np.array(pre_schema)
 
-        if (~schema.any(axis=1)).sum() == 0:
+        if pre_schema.shape != [len(self.actors)] * 2:
+            raise RuntimeError(
+                "Pre-decision schema does not have valid dimensions.")
+
+        if (~pre_schema.any(axis=1)).sum() == 0:
             raise RuntimeError(
                 "Order schema does not have any zero row. There is no actor to put at the start of the order.")
 
-        if (~schema.T.any(axis=1)).sum() == 0:
+        if (~pre_schema.T.any(axis=1)).sum() == 0:
             raise RuntimeError(
                 "Order schema does not have any zero column. There is no actor to put at the end of the order.")
 
-        if schema.trace() != 0:
+        if pre_schema.trace() != 0:
             raise RuntimeError(
                 "Order schema has non-zero trace. There is at least one actor which is observing its own action.")
 
-        if np.bitwise_and(schema, schema.T).sum() != 0:
+        if np.bitwise_and(pre_schema, pre_schema.T).sum() != 0:
             raise RuntimeError(
                 "There is a race between a pair of actors. They both want to observe each others actions.")
 
@@ -121,8 +124,8 @@ class Arena:
         # remove this row and corresponding column, np.delete(np.delete(schema, idx, 0), idx, 1)
         # continue until no more entries are left
 
-        tmp_actors = list(range(len(schema)))
-        tmp_schema = np.copy(schema)
+        tmp_actors = list(range(len(pre_schema)))
+        tmp_schema = np.copy(pre_schema)
         self.order = list()
         while len(tmp_actors):
             idx = np.where(~tmp_schema.any(axis=1))[0][0]
@@ -131,14 +134,33 @@ class Arena:
             tmp_schema = np.delete(np.delete(tmp_schema, idx, 0), idx, 1)
 
         # save a local copy of the schema
-        self.schema = schema
+        self.pre_schema = pre_schema
         # afterwards, we can access the pre-decision information set of each actor as
         # (self.schema[self.order[idx]])[self.order]
         # for each idx
+        # check if post-decision information schema is provided.
+        if post_schema is None:
+            if post_schema_is_identity:
+                # we use "all observations" as default
+                post_schema = np.ones([len(self.actors)] * 2)
+            else:
+                # this schema is always pre-decision information schema + identity + extra info
+                post_schema = pre_schema + np.eye(len(self.actors))
 
-    def post_schema(self, schema):
-        # this schema is always pre_decision_info_schema + identity + extra info
-        pass
+        if post_schema.shape != [len(self.actors)] * 2:
+            raise RuntimeError(
+                "Post-decision schema does not have valid dimensions.")
+
+        if post_schema.trace() != len(self.actors):
+            raise RuntimeError(
+                "Post-decision schema has invalid trace. Each actor should have its own action as a post-decision information.")
+
+        if not np.all(np.multiply((pre_schema != 0), post_schema) == (pre_schema != 0)):
+            raise RuntimeError(
+                "Post-decision schema does not contain pre-decision schema.")
+
+        # save a local copy of post-decision information schema
+        self.post_schema = post_schema
 
     def stats(self): pass
 
