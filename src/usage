@@ -1,0 +1,38 @@
+# A simple reinforcement learning (RL) setup
+
+import arena
+import actors from arena.examples
+
+rl = arena.Arena() # start a new arena
+
+agent = actors.GreedyQAgent()
+domain = actors.SimpleMDP()
+
+rl.register(agent, domain)
+
+rl.pre_decision_info_schema([[0,0],[1,0]])
+rl.post_decision_info_schema([[1,1],[1,1]])
+
+while True:
+    rl.tick()
+    if domain.says('done'): break
+
+some_stats = rl.stats()
+
+domain.render()
+
+# A simple normal game (NG) setup
+
+import arena
+import actors from arena.examples
+
+ng = arena.Arena() # start a new arena
+
+aco_agent = actors.AlwayCoOpAgent()
+tft_agent = actors.TitForTatAgent()
+
+ng.register(aco_agent, tft_agent)
+
+ng.pre_decision_info_schema([[0,0],[0,0]])
+
+ng.tick()
