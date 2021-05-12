@@ -1,5 +1,6 @@
-import abc
 import numpy as np
+import abc
+import helpers
 
 
 class Arena:
@@ -8,11 +9,22 @@ class Arena:
         self.args = args
         self.kwargs = kwargs
         # history managers for every actor
-        # self.history_mgr = arena.HistoryManager()
+        # self.history_mgr = helpers.HistoryManager()
         self.actors = list()
         self.pre_decision_schema = list()
         self.post_decision_schema = list()
         self.order = list()
+
+    def standard_sample(channel):
+        rng = np.random.default_rng()
+        if isinstance(channel, helpers.Reals):
+            return rng.standard_gamma(1)
+        if isinstance(channel, helpers.Naturals):
+            return rng.geometric(0.5) - 1
+        if isinstance(channel, helpers.Sequence):
+            return rng.choice(range(channel.len))
+        if isinstance(channel, helpers.Interval):
+            return rng.uniform(0.0, channel.len)
 
     def tick(self, steps=1):
         """
@@ -64,14 +76,14 @@ class Arena:
 
     def register(self, actors):
         """
-        register actors to the arena
+        register actors to the helpers
         initiate history managers for each actor
         """
         for actor in self.actors:
             if not isinstance(actor, Actor):
                 raise RuntimeError("{} is not an actor.".format(actor))
             self.actors.append(actor)
-            self.history_mgr[id(actor)] = arena.HistoryManager(
+            self.history_mgr[id(actor)] = helpers.HistoryManager(
                 history_maxlen=actor.history_maxlen)
 
     def deregister(self, actors): pass
@@ -166,18 +178,72 @@ class Arena:
 
 
 class Actor(abc.ABC):
-    def __init__(self, *args, **kwargs):
+    def __init__(self, name=None, *args, **kwargs):
         self.args = args
         self.kwargs = kwargs
+        self.name = 'actor_{}'.format(id(self)) if name is None else name
         self.messages = list()
         self.history_maxlen = self.kwargs.get('history_maxlen', 10)
+        self.controlers = dict()
+
+        # inward signals
+        self.control_space = [helpers.Sequence()]  # a_in default control
+        # [('real', math.inf), ('real', 1.0), ('natural', math.inf), ('natural', 10)]
+        # [Reals(), Interval(1.0), Naturals(), Sequence(10)]
+        self.percept_space = ['<from second person>']  # e_in
+
+        # outward signals
+        self.feedback_space = [helpers.Interval()]  # a_out
+        # [('natural', math.inf)]
+        # [Naturals()]
+        self.action_space = []  # <from second person> e_out
+        self.controlled = dict()
 
     def says(self, message):
         return True if self.messages.contains(message) else False
 
-    def setup(self): pass
+    def setup(self):
+        # set percept_space and action_space for the actors being controlled from it
+        # environment -> agent
+        # agent.action_space = env.control_space
+        # agent.percept_space = env.feedback_space
+        # evn receives (control_space, percept_space) at input, (a, None)
+        # env produces (feedback_space, action_space) at output, (e, None)
+        return self
+
+    def controlled_by(self, actor, channels=None):
+        # request all control channels
+        if channels is None:
+            channels = range(len(self.control_space))
+        # assert actor
+        if not isinstance(self, Actor):
+            raise RuntimeError("{} is not an actor.".format(actor))
+        # only valid channels are requested
+        if not set(channels) <= set(range(len(self.control_space))):
+            raise RuntimeError("The requested channels are not valid.")
+        # all channels are available
+        if any(key in self.controlers for key in channels):
+            raise RuntimeError("The requested channel is already allocated.")
+        # allot the requested channels
+        for channel in channels:
+            self.controlers[channel] = actor
+            actor.controlled[len(actor.action_space)] = self
+            actor.action_space.append(self.control_space[channel])
+        # return `self` so the function calls may be chained
+        return self
+
+    def influenced_by(self, actor, channels):
+        """
+        the information stored in the history
+        this is extra from it's own actions, own controls, and own feedbacks
+        in this function the actor can ask for action and 
+        """
+
+        return self
 
     def act(self, history, pre_decision_info):
+        # pre_decision_info should "agree" with the input space
+        # output space is "received" from another actors
         pass
 
     def state(self, history, pre_decision_info):
@@ -185,33 +251,97 @@ class Actor(abc.ABC):
 
     def evaluate(self, history, pre_decision_info, decision): pass
     # the size of returned evaluation should match pre_decision_info
+    # the return vector should be of the size of the control channels
+    # takes in complete history -> R^[size of controls]
 
     def learn(self, history): pass
 
     def render(self):
         pass
 
+# there might be actors which have vector controls, like factors of action space
+# they can connect to multiple actors, where each actor controls a part of controls
+# we should allow for a continuos control inputs with some sampling function
+# important thing is to allow function approximation in the actors
+# so they can keep approximate statistics
+# Actor [a_out, e_out], [a_in, e_in]
+# why do we need a_in and e_in?
+# formally a_in and e_in can have same effect
+# the actor may use e_in as as control input
+# (a_in_1, a_in_2, a_in_3, ... , a_in_{K-1})
+# action cycle
+# [a_out, e_out] = actor.act(history, [a_in, e_in])
+# evaluation cycle
+# r = actor.evaluate([histroy [a_in, e_in] [a_out, e_out]])
+# Dims, Continuous/discrete, bounded/unbounded
+# (1, 'natural', 10)
+# (1, 'real', 1.0)
+# (1, 'natural', math.inf)
+# (1, 'real', math.inf)
+# [('real', 1.0), ('real', 1.0)] => [0.0, 1.0] x [0.0, 1.0]
+# [('natural', math.inf), ('real', 2.0)] => N x [0.0, 2.0]
+# [('natural', 4), ('natural', 2)] => {0, 1, 2, 3} x {0, 1}
+# [('real', math.inf), ('real', math.inf)] => R x R
+# it could be empty []
 
-__name__ == "main"
+# design choices: spaces start from zero and always closed intervals
+# the controlling agent may control a part of the control space. The rest of the controls are chosen at random.
+# Important: the fixed controls are like an actor acting on it by "choosing" a fixed control.
+# for example, if the control space is R x R, but the controlling actor is only choosing the first coordinate then the second
+# coordinate is chosen at random. It is same to say that the agent has chosen any point on the line.
 
-rl = Arena()
-rl.actors = ['act0', 'act1', 'act2', 'act3', 'act4']
-# rl.pre_decision_info_schema([[0, 0, 1, 0, 1],
-#                              [1, 0, 1, 0, 0],
-#                              [0, 0, 0, 0, 1],
-#                              [1, 1, 0, 0, 1],
-#                              [0, 0, 0, 0, 0]])
+# let an helpers have 5 actors, e.g. [a0, a1, a2, a3, a4]
+# from a2's perspective
+# a2 is controlled by: [a0, a4] <= from pre_schema
+# a2 is influenced by: [a2, a3] <= from post_schema - pre_schema
+# a2 is independent of: [a1] <= not connected in any schemata
 
-rl.pre_decision_info_schema([[0, 0, 0, 0, 1],
-                             [1, 0, 0, 0, 0],
-                             [0, 0, 0, 0, 1],
-                             [1, 1, 0, 0, 1],
-                             [0, 0, 0, 0, 0]])
+# maybe we can use post_schema directly to get the 'influence' diagram
+# control dimensions are control channels. (one to many)
+# in an RL helpers: agent is influenced by the environment, but not controlled by it
+# the environment is controlled by the environment.
+# we can use flags
+# [1, 1, 0, 0] means a0 controls channel 0 and 1 of a2
+# [0, 0, 1, 0] means a1 controls channel 2 of a2
+# channel 3 is chosen randomly
+# a2 can decide to receive a subset of (action + feedback) channels from a2 and a3, e.g. [0,0,1] and [1,0,1,0], as percepts
 
-rl.tick()
 
-# rl.post_decision_info_schema([[1, 1, 1, 1, 1],
-#                               [1, 0, 1, 0, 0],
-#                               [1, 0, 1, 0, 0],
-#                               [1, 1, 0, 1, 1],
-#                               [0, 0, 0, 0, 0]])
+if __name__ == "__main__":
+
+    agent = Actor('Agent007')
+    domain = Actor('Starship')
+    domain.control_space = [helpers.Reals(), helpers.Naturals(),
+                            helpers.Sequence(10), helpers.Interval(2.0)]
+
+    domain.controlled_by(agent, [1, 3]).controlled_by(agent, [0])
+
+    rl = Arena()
+    rl.actors = ['act0', 'act1', 'act2', 'act3', 'act4']
+
+    rl.schemata(
+        pre_schema=[[0, 0, 1, 0, 1],
+                    [1, 0, 1, 0, 0],
+                    [0, 0, 0, 0, 1],
+                    [1, 1, 0, 0, 1],
+                    [0, 0, 0, 0, 0]],
+        post_schema=[[1, 0, 1, 0, 1],
+                     [1, 1, 1, 0, 0],
+                     [0, 0, 1, 0, 1],
+                     [1, 1, 0, 1, 1],
+                     [0, 0, 0, 0, 1]]
+    )
+
+    rl.schemata([[0, 0, 0, 0, 1],
+                [1, 0, 0, 0, 0],
+                [0, 0, 0, 0, 1],
+                [1, 1, 0, 0, 1],
+                [0, 0, 0, 0, 0]])
+
+    rl.tick()
+
+    # rl.schemata([[1, 1, 1, 1, 1],
+    #              [1, 0, 1, 0, 0],
+    #              [1, 0, 1, 0, 0],
+    #              [1, 1, 0, 1, 1],
+    #              [0, 0, 0, 0, 0]])

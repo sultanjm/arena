@@ -1,11 +1,13 @@
-import arena
 
 import collections
 import itertools
 import numpy as np
-import grl
 import copy
 import enum
+import abc
+import math
+
+import core
 
 
 class Index(enum.Enum):
@@ -30,118 +32,118 @@ class HistoryManager:
         self.state_func = state_func
         self.listeners = collections.defaultdict(set)
 
-    def record(self, items, notify=True):
-        steps = len(items) / self.steplen
-        if steps and notify:
-            self.dispatch(grl.EventType.ADD, {
-                          'history': self.history, 'update': items})
-        for item in items:
-            self.history.append(item)
-        self.history.steps += steps
+    # def record(self, items, notify=True):
+    #     steps = len(items) / self.steplen
+    #     if steps and notify:
+    #         self.dispatch(grl.EventType.ADD, {
+    #                       'history': self.history, 'update': items})
+    #     for item in items:
+    #         self.history.append(item)
+    #     self.history.steps += steps
 
-        return self
+    #     return self
 
-    def extend(self, items, notify=True):
-        steps = len(items) / self.steplen
-        if steps and notify:
-            self.dispatch(grl.EventType.ADD, {
-                          'history': self.history, 'update': items})
-        for item in items:
-            self.history.extension.append(item)
-        self.history.xsteps += steps
-        return self
+    # def extend(self, items, notify=True):
+    #     steps = len(items) / self.steplen
+    #     if steps and notify:
+    #         self.dispatch(grl.EventType.ADD, {
+    #                       'history': self.history, 'update': items})
+    #     for item in items:
+    #         self.history.extension.append(item)
+    #     self.history.xsteps += steps
+    #     return self
 
-    def drop(self, steps=1.0, notify=True):
-        if not (float(steps) * self.steplen).is_integer():
-            raise RuntimeError(
-                "unable to drop {} elements.".format(steps * self.steplen))
-        dropped = list()
-        for _ in range(int(steps*self.steplen)):
-            dropped.append(self.history.pop())
-        self.history.steps -= steps
-        if dropped and notify:
-            self.dispatch(grl.EventType.REMOVE, {
-                          'history': self.history, 'update': dropped[::-1]})
-        return dropped[::-1]
+    # def drop(self, steps=1.0, notify=True):
+    #     if not (float(steps) * self.steplen).is_integer():
+    #         raise RuntimeError(
+    #             "unable to drop {} elements.".format(steps * self.steplen))
+    #     dropped = list()
+    #     for _ in range(int(steps*self.steplen)):
+    #         dropped.append(self.history.pop())
+    #     self.history.steps -= steps
+    #     if dropped and notify:
+    #         self.dispatch(grl.EventType.REMOVE, {
+    #                       'history': self.history, 'update': dropped[::-1]})
+    #     return dropped[::-1]
 
-    def xdrop(self, steps=None, notify=True):
-        if steps is None:
-            steps = self.history.xsteps
-        dropped = list()
-        if not (float(steps) * self.steplen).is_integer():
-            raise RuntimeError(
-                "unable to drop {} elements.".format(steps * self.steplen))
-        for _ in range(int(steps*self.steplen)):
-            dropped.append(self.history.extension.pop())
-        self.history.xsteps -= steps
-        if dropped and notify:
-            self.dispatch(grl.EventType.REMOVE, {
-                          'history': self.history, 'update': dropped[::-1]})
-        return dropped[::-1]
+    # def xdrop(self, steps=None, notify=True):
+    #     if steps is None:
+    #         steps = self.history.xsteps
+    #     dropped = list()
+    #     if not (float(steps) * self.steplen).is_integer():
+    #         raise RuntimeError(
+    #             "unable to drop {} elements.".format(steps * self.steplen))
+    #     for _ in range(int(steps*self.steplen)):
+    #         dropped.append(self.history.extension.pop())
+    #     self.history.xsteps -= steps
+    #     if dropped and notify:
+    #         self.dispatch(grl.EventType.REMOVE, {
+    #                       'history': self.history, 'update': dropped[::-1]})
+    #     return dropped[::-1]
 
-    def xmerge(self):
-        if self.history.extension:
-            self.record(self.xdrop(notify=False), notify=False)
-        else:
-            raise ValueError("The extension is empty.")
+    # def xmerge(self):
+    #     if self.history.extension:
+    #         self.record(self.xdrop(notify=False), notify=False)
+    #     else:
+    #         raise ValueError("The extension is empty.")
 
-    # @property
-    # def history(self):
-    #     return self.history
+    # # @property
+    # # def history(self):
+    # #     return self.history
 
-    # @history.setter
-    # def history(self, h):
-    #     if not isinstance(h, History):
-    #         raise RuntimeError("No valid History object is provided.")
-    #     self.history = h
+    # # @history.setter
+    # # def history(self, h):
+    # #     if not isinstance(h, History):
+    # #         raise RuntimeError("No valid History object is provided.")
+    # #     self.history = h
 
-    def state(self, history, *args, **kwargs):
-        index = kwargs.get('index', Index.CURRENT)
-        extension = kwargs.get('extension', list())
-        history_mgr = self.assert_history_mgr(history)
+    # def state(self, history, *args, **kwargs):
+    #     index = kwargs.get('index', Index.CURRENT)
+    #     extension = kwargs.get('extension', list())
+    #     history_mgr = self.assert_history_mgr(history)
 
-        change = history_mgr.amend(history, index, extension)
-        s = self.state_func(history, *args, **kwargs)
-        history_mgr.mend(change)
-        return s
+    #     change = history_mgr.amend(history, index, extension)
+    #     s = self.state_func(history, *args, **kwargs)
+    #     history_mgr.mend(change)
+    #     return s
 
-    def assert_history_mgr(self, history):
-        history_mgr = self
-        if history is not self.history:
-            history_mgr = copy.deepcopy(self)
-            history_mgr.history = history
-        return history_mgr
+    # def assert_history_mgr(self, history):
+    #     history_mgr = self
+    #     if history is not self.history:
+    #         history_mgr = copy.deepcopy(self)
+    #         history_mgr.history = history
+    #     return history_mgr
 
-    def register(self, obj, event_type=grl.EventType.ALL):
-        self.listeners[event_type].add(obj)
+    # def register(self, obj, event_type=EventType.ALL):
+    #     self.listeners[event_type].add(obj)
 
-    def deregister(self, obj, event_type=grl.EventType.ALL):
-        self.listeners[event_type].discard(obj)
+    # def deregister(self, obj, event_type=grl.EventType.ALL):
+    #     self.listeners[event_type].discard(obj)
 
-    def dispatch(self, event_type, data):
-        evt = grl.Event(event_type, data)
-        for obj in self.listeners[event_type]:
-            obj.on(evt)
+    # def dispatch(self, event_type, data):
+    #     evt = grl.Event(event_type, data)
+    #     for obj in self.listeners[event_type]:
+    #         obj.on(evt)
 
-    def amend(self, history, index=Index.CURRENT, extension=list()):
-        old_h = list()
-        old_xtn = list()
-        # prepare history for non-current indexes
-        if index == Index.NEXT:
-            old_xtn = self.xdrop()
-            self.extend(old_xtn).extend(extension)
-        elif index == Index.PREVIOUS:
-            old_xtn = self.xdrop(1.0)
-            if not old_xtn:
-                old_h = self.drop(1.0)
-        return [old_h, old_xtn]
+    # def amend(self, history, index=Index.CURRENT, extension=list()):
+    #     old_h = list()
+    #     old_xtn = list()
+    #     # prepare history for non-current indexes
+    #     if index == Index.NEXT:
+    #         old_xtn = self.xdrop()
+    #         self.extend(old_xtn).extend(extension)
+    #     elif index == Index.PREVIOUS:
+    #         old_xtn = self.xdrop(1.0)
+    #         if not old_xtn:
+    #             old_h = self.drop(1.0)
+    #     return [old_h, old_xtn]
 
-    def mend(self, change):
-        old_h, old_xtn = change
-        # undo the changes in the history
-        self.xdrop()
-        self.record(old_h).extend(old_xtn)
-        return self
+    # def mend(self, change):
+    #     old_h, old_xtn = change
+    #     # undo the changes in the history
+    #     self.xdrop()
+    #     self.record(old_h).extend(old_xtn)
+    #     return self
 
 
 class PerceptManager:
@@ -225,3 +227,29 @@ class RewardManager:
 
         self.history_mgr.mend(change)
         return r
+
+
+class Space(abc.ABC):
+    def __init__(self, *args, **kwargs):
+        self.args = args
+        self.kwargs = kwargs
+
+
+class Interval(Space):
+    def __init__(self, len=1.0):
+        self.len = len
+        super().__init__(self)
+
+
+class Naturals(Space):
+    pass
+
+
+class Sequence(Space):
+    def __init__(self, len=1):
+        self.len = len
+        super().__init__(self)
+
+
+class Reals(Space):
+    pass

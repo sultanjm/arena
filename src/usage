@@ -5,10 +5,16 @@ import actors from arena.examples
 
 rl = arena.Arena() # start a new arena
 
-agent = actors.GreedyQAgent()
+agent1 = actors.GreedyQAgent()
+agent2 = actors.RandomAgent()
 domain = actors.SimpleMDP()
 
-rl.register(agent, domain)
+domain.controlled_by(agent1, channels=[0,1])
+domain.controlled_by(agent2, channels=[2])
+agent1.influenced_by(domain, channels=[0], control_channels=[2])
+agent2.influenced_by(domain, channels=[0,1], control_channels=[0,1])
+
+rl.register(agent1, agent2, domain)
 
 rl.pre_decision_info_schema([[0,0],[1,0]])
 rl.post_decision_info_schema([[1,1],[1,1]])
@@ -30,8 +36,14 @@ ng = arena.Arena() # start a new arena
 
 aco_agent = actors.AlwayCoOpAgent()
 tft_agent = actors.TitForTatAgent()
+pd = actors.PrisonersDilemma()
 
-ng.register(aco_agent, tft_agent)
+pd.controlled_by(aco_agent, channels=[0])
+pd.controlled_by(tft_agent, channels=[1])
+aco_agent.influenced_by(pd)
+tft_agent.influenced_by(pd)
+
+ng.register(pd, aco_agent, tft_agent)
 
 ng.pre_decision_info_schema([[0,0],[0,0]])
 
