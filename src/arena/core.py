@@ -215,9 +215,9 @@ class Actor(abc.ABC):
         # env produces (feedback_space, action_space) at output, (e, None)
         return self
 
-    def controlled_by(self, actor, control_channels=None):
+    def controlled_by(self, actor, control_channels=[]):
         # request all control channels
-        if control_channels is None:
+        if len(control_channels) == 0:
             control_channels = range(len(self.control_space))
         # assert actor
         if not isinstance(actor, Actor):
@@ -236,7 +236,7 @@ class Actor(abc.ABC):
         # return `self` so the function calls may be chained
         return self
 
-    def influenced_by(self, actor, feedback_channels=None, action_channels=None):
+    def influenced_by(self, actor, feedback_channels=[], action_channels=[]):
         """
         the information stored in the history
         this is extra from it's own controls, actions, and feedbacks
@@ -248,10 +248,10 @@ class Actor(abc.ABC):
         if not isinstance(actor, Actor):
             raise RuntimeError("{} is not an actor.".format(actor))
         # request all channels
-        if action_channels is None:
+        if len(action_channels) + len(feedback_channels) == 0:
             action_channels = range(len(actor.action_space))
-        if feedback_channels is None:
             feedback_channels = range(len(actor.feedback_space))
+
         # only valid channels are requested
         if not set(action_channels) <= set(range(len(actor.action_space))):
             raise RuntimeError("The requested action channels are not valid.")
@@ -349,6 +349,18 @@ if __name__ == "__main__":
 
     domain.controlled_by(agent)
     agent.influenced_by(domain, feedback_channels=[0, 2])
+
+    agentA = Actor('AgentA')
+    agentB = Actor('AgentB')
+    pd = Actor('PD')
+    pd.control_space = [helpers.Naturals(), helpers.Interval(2.0)]
+    pd.feedback_space = []
+
+    pd.controlled_by(agentA, control_channels=[0])
+    pd.controlled_by(agentB, control_channels=[1])
+
+    agentA.influenced_by(agentB, action_channels=[0])
+    agentB.influenced_by(agentA, action_channels=[0])
 
     rl = Arena()
     rl.actors = ['act0', 'act1', 'act2', 'act3', 'act4']
