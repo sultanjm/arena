@@ -9,10 +9,10 @@ agent1 = actors.GreedyQAgent()
 agent2 = actors.RandomAgent()
 domain = actors.SimpleMDP()
 
-domain.controlled_by(agent1, channels=[0,1])
-domain.controlled_by(agent2, channels=[2])
-agent1.influenced_by(domain, channels=[0], control_channels=[2])
-agent2.influenced_by(domain, channels=[0,1], control_channels=[0,1])
+domain.controlled_by(agent1, control_channels=[0,1])
+domain.controlled_by(agent2, control_channels=[2])
+agent1.influenced_by(domain, control_channels=[2], feedback_channels=[0])
+agent2.influenced_by(domain, control_channels=[0,1], feedback_channels=[0,1])
 
 rl.register(agent1, agent2, domain)
 

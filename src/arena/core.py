@@ -184,20 +184,24 @@ class Actor(abc.ABC):
         self.name = 'actor_{}'.format(id(self)) if name is None else name
         self.messages = list()
         self.history_maxlen = self.kwargs.get('history_maxlen', 10)
+        # actors controlling any part of `control_space`
         self.controlers = dict()
+        # actors providing feedback into `percept_space`
+        self.influencers = dict()
+        # ...
+        self.controlled = dict()
 
         # inward signals
         self.control_space = [helpers.Sequence()]  # a_in default control
         # [('real', math.inf), ('real', 1.0), ('natural', math.inf), ('natural', 10)]
         # [Reals(), Interval(1.0), Naturals(), Sequence(10)]
-        self.percept_space = ['<from second person>']  # e_in
+        self.percept_space = []  # e_in
 
         # outward signals
         self.feedback_space = [helpers.Interval()]  # a_out
         # [('natural', math.inf)]
         # [Naturals()]
         self.action_space = []  # <from second person> e_out
-        self.controlled = dict()
 
     def says(self, message):
         return True if self.messages.contains(message) else False
@@ -211,33 +215,60 @@ class Actor(abc.ABC):
         # env produces (feedback_space, action_space) at output, (e, None)
         return self
 
-    def controlled_by(self, actor, channels=None):
+    def controlled_by(self, actor, control_channels=None):
         # request all control channels
-        if channels is None:
-            channels = range(len(self.control_space))
+        if control_channels is None:
+            control_channels = range(len(self.control_space))
         # assert actor
-        if not isinstance(self, Actor):
+        if not isinstance(actor, Actor):
             raise RuntimeError("{} is not an actor.".format(actor))
         # only valid channels are requested
-        if not set(channels) <= set(range(len(self.control_space))):
+        if not set(control_channels) <= set(range(len(self.control_space))):
             raise RuntimeError("The requested channels are not valid.")
         # all channels are available
-        if any(key in self.controlers for key in channels):
+        if any(key in self.controlers for key in control_channels):
             raise RuntimeError("The requested channel is already allocated.")
         # allot the requested channels
-        for channel in channels:
+        for channel in control_channels:
             self.controlers[channel] = actor
             actor.controlled[len(actor.action_space)] = self
             actor.action_space.append(self.control_space[channel])
         # return `self` so the function calls may be chained
         return self
 
-    def influenced_by(self, actor, channels):
+    def influenced_by(self, actor, feedback_channels=None, action_channels=None):
         """
         the information stored in the history
-        this is extra from it's own actions, own controls, and own feedbacks
-        in this function the actor can ask for action and 
+        this is extra from it's own controls, actions, and feedbacks
+        in this function the actor can ask for actions and feedbacks channels from other agents
+        make sure the channels in its own control are not listed in the influenced list
+        this information is populated after every agent has taken their actions
         """
+        # assert actor
+        if not isinstance(actor, Actor):
+            raise RuntimeError("{} is not an actor.".format(actor))
+        # request all channels
+        if action_channels is None:
+            action_channels = range(len(actor.action_space))
+        if feedback_channels is None:
+            feedback_channels = range(len(actor.feedback_space))
+        # only valid channels are requested
+        if not set(action_channels) <= set(range(len(actor.action_space))):
+            raise RuntimeError("The requested action channels are not valid.")
+        if not set(feedback_channels) <= set(range(len(actor.feedback_space))):
+            raise RuntimeError(
+                "The requested feedback channels are not valid.")
+        # remove any action channel already allocated to a control channel
+        channels = [k for k, v in self.controlers.items() if v == actor]
+        action_channels = [x for x in action_channels if x not in channels]
+        for channel in action_channels:
+            self.influencers[len(self.influencers)] = [
+                actor, 'action', channel]
+            self.percept_space.append(actor.action_space[channel])
+        for channel in feedback_channels:
+            self.influencers[len(self.influencers)] = [
+                actor, 'feedback', channel]
+            self.percept_space.append(actor.feedback_space[channel])
 
         return self
 
@@ -313,8 +344,11 @@ if __name__ == "__main__":
     domain = Actor('Starship')
     domain.control_space = [helpers.Reals(), helpers.Naturals(),
                             helpers.Sequence(10), helpers.Interval(2.0)]
+    domain.feedback_space = [
+        helpers.Naturals(), helpers.Sequence(2), helpers.Interval(2.0)]
 
-    domain.controlled_by(agent, [1, 3]).controlled_by(agent, [0])
+    domain.controlled_by(agent)
+    agent.influenced_by(domain, feedback_channels=[0, 2])
 
     rl = Arena()
     rl.actors = ['act0', 'act1', 'act2', 'act3', 'act4']
