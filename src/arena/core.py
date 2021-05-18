@@ -39,6 +39,27 @@ class Arena:
             # update histories using the current decision vector
             self.update(decision_vector)
 
+            # history update for any actor is:
+            # controls, actions, feedbacks, percepts
+            # controls <= from preceding actors
+            # actions => to succeeding actors
+            # act cycle
+            self.act_cycle()
+            # histroy + controls --> actions (-> controls)
+            # response cycle
+            self.response_cycle()
+            # history + controls + actions --> feedback (-> percepts)
+            # evaluate each control at the history (dispatch to every controller)
+            # learn cycle
+            self.learn_cycle()
+            # history + controls + actions + feedback + percept --> history
+            # a history update is [controls, actions, feedback, percept]
+
+    def act_cycle(self):
+        for actor_id in self.order:
+            action = self.actors[actor_id].act(
+                self.history_mgr.history(self.actors[actor_id]))
+
     def interact(self):
         # make a (None) decision vector
         decision_vector = [None] * len(self.actors)
@@ -74,7 +95,7 @@ class Arena:
             self.actors[actor_id].learn(
                 self.history_mgr.history(self.actors[actor_id]))
 
-    def register(self, actors):
+    def register2(self, actors):
         """
         register actors to the helpers
         initiate history managers for each actor
@@ -85,6 +106,22 @@ class Arena:
             self.actors.append(actor)
             self.history_mgr[id(actor)] = helpers.HistoryManager(
                 history_maxlen=actor.history_maxlen)
+
+    def register(self, *actors):
+        """
+        register actors to the helpers
+        initiate history managers for each actor
+        """
+        for actor in actors:
+            # already registered, skip it
+            if actor in self.actors:
+                continue
+            # register every controller of the actor
+            # because the arena can't function without the controllers
+            self.register(*actor.controlers.values())
+            # check if the actor can be registered
+            self.actors.append(actor)
+            # self.history_mgr[id(actor)] = helpers.HistoryManager(history_maxlen=actor.history_maxlen)
 
     def deregister(self, actors): pass
 
@@ -184,12 +221,14 @@ class Actor(abc.ABC):
         self.name = 'actor_{}'.format(id(self)) if name is None else name
         self.messages = list()
         self.history_maxlen = self.kwargs.get('history_maxlen', 10)
-        # actors controlling any part of `control_space`
+        # actors is controlling any part of `control_space`
         self.controlers = dict()
+        # actors being controlled by these actors
+        self.controlled = dict()
+        # controllers and controlled should be disjoint!!!
+
         # actors providing feedback into `percept_space`
         self.influencers = dict()
-        # ...
-        self.controlled = dict()
 
         # inward signals
         self.control_space = [helpers.Sequence()]  # a_in default control
@@ -215,13 +254,29 @@ class Actor(abc.ABC):
         # env produces (feedback_space, action_space) at output, (e, None)
         return self
 
+    def is_controlled(self, actor):
+        """
+        check through the control chain
+        """
+        # the actor is in the controlled list
+        if actor in self.controlled.values():
+            return True
+        # check further down the line
+        for controlled_actor in self.controlled.values():
+            if controlled_actor.is_controlled(actor):
+                return True
+        # not controlled anywhere in the hierarchy
+        return False
+
     def controlled_by(self, actor, control_channels=[]):
+        # the input actor (actor) must not be controlled by the current actor (self)
+        # otherwise it will create a cycle in the control mechanism
+        if self.is_controlled(actor):
+            raise RuntimeError(
+                "The actor is already being controlled by the current actor.")
         # request all control channels
-        if len(control_channels) == 0:
+        if not control_channels:
             control_channels = range(len(self.control_space))
-        # assert actor
-        if not isinstance(actor, Actor):
-            raise RuntimeError("{} is not an actor.".format(actor))
         # only valid channels are requested
         if not set(control_channels) <= set(range(len(self.control_space))):
             raise RuntimeError("The requested channels are not valid.")
@@ -248,7 +303,7 @@ class Actor(abc.ABC):
         if not isinstance(actor, Actor):
             raise RuntimeError("{} is not an actor.".format(actor))
         # request all channels
-        if len(action_channels) + len(feedback_channels) == 0:
+        if not action_channels and not feedback_channels:
             action_channels = range(len(actor.action_space))
             feedback_channels = range(len(actor.feedback_space))
 
@@ -279,6 +334,9 @@ class Actor(abc.ABC):
 
     def state(self, history, pre_decision_info):
         return history[-1]
+
+    def response(self, history, pre_decision_info):
+        pass
 
     def evaluate(self, history, pre_decision_info, decision): pass
     # the size of returned evaluation should match pre_decision_info
@@ -337,13 +395,27 @@ class Actor(abc.ABC):
 # channel 3 is chosen randomly
 # a2 can decide to receive a subset of (action + feedback) channels from a2 and a3, e.g. [0,0,1] and [1,0,1,0], as percepts
 
+# history update for any actor is:
+# controls, actions, feedbacks, percepts
+# controls <= from preceding actors
+# actions => to succeeding actors
+# act cycle
+# histroy + controls --> actions (-> controls)
+# response cycle
+# history + controls + actions --> feedback (-> percepts)
+# evaluate each control at the history (dispatch to every controller)
+# learn cycle
+# history + controls + actions + feedback + percept --> history
+
+# a history update is [controls, actions, feedback, percept]
+
 
 if __name__ == "__main__":
 
     agent = Actor('Agent007')
     domain = Actor('Starship')
-    domain.control_space = [helpers.Reals(), helpers.Naturals(),
-                            helpers.Sequence(10), helpers.Interval(2.0)]
+    domain.control_space = [helpers.Reals(), helpers.Naturals(
+    ), helpers.Sequence(10), helpers.Interval(2.0)]
     domain.feedback_space = [
         helpers.Naturals(), helpers.Sequence(2), helpers.Interval(2.0)]
 
@@ -354,15 +426,20 @@ if __name__ == "__main__":
     agentB = Actor('AgentB')
     pd = Actor('PD')
     pd.control_space = [helpers.Naturals(), helpers.Interval(2.0)]
-    pd.feedback_space = []
+    pd.feedback_space = pd.control_space
 
     pd.controlled_by(agentA, control_channels=[0])
     pd.controlled_by(agentB, control_channels=[1])
 
-    agentA.influenced_by(agentB, action_channels=[0])
-    agentB.influenced_by(agentA, action_channels=[0])
+    agentA.influenced_by(pd, feedback_channels=[1])
+    agentB.influenced_by(pd, feedback_channels=[0])
 
     rl = Arena()
+
+    rl.register(agentB, pd)
+    rl.register(pd)
+    rl.register(agentA)
+
     rl.actors = ['act0', 'act1', 'act2', 'act3', 'act4']
 
     rl.schemata(

@@ -27,6 +27,8 @@ some_stats = rl.stats()
 
 domain.render()
 
+###########################################
+
 # A simple normal game (NG) setup
 
 import arena
@@ -48,3 +50,29 @@ ng.register(pd, aco_agent, tft_agent)
 ng.pre_decision_info_schema([[0,0],[0,0]])
 
 ng.tick()
+
+
+
+###########################################
+
+# ARL setup
+
+import arena
+import actors from arena.examples
+
+arl = arena.Arena('dangal')
+
+agent = actors.GreedyQAgent('chooha')
+env = actors.SimpleMDP('boolbolian')
+
+env.controlled_by(agent)
+agent.influenced_by(env)
+
+arl.register(agent, env)
+arl.register(env)
+
+while True:
+    arl.tick()
+    if env.says('done'): break
+
+
