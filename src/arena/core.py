@@ -1,6 +1,7 @@
 import numpy as np
 import abc
 import helpers
+from collections import defaultdict
 
 
 class Arena:
@@ -14,17 +15,19 @@ class Arena:
         self.pre_decision_schema = list()
         self.post_decision_schema = list()
         self.order = list()
+        # self.schemata[actor_A]['controls'][actor_B] = [B's control_channels idx]
+        # self.schemata[actor_A]['acts'][actor_B] = [A's action_channels idx]
 
-    def standard_sample(channel):
-        rng = np.random.default_rng()
-        if isinstance(channel, helpers.Reals):
-            return rng.standard_gamma(1)
-        if isinstance(channel, helpers.Naturals):
-            return rng.geometric(0.5) - 1
-        if isinstance(channel, helpers.Sequence):
-            return rng.choice(range(channel.len))
-        if isinstance(channel, helpers.Interval):
-            return rng.uniform(0.0, channel.len)
+        # self.control_schema[actor_A][actor_B] = [A's control_channels idx]
+        # self.action_schema[actor_A][actor_B] = [A's action_channels idx]
+        self.schemata = defaultdict(dict)
+
+        # self.control_edges[actor_A][actor_B] = [(A's action_channel, B's control_channel)]
+        self.control_edges = defaultdict(dict)
+
+        # for each idx in range(control_space)
+        # actor.control_edges[idx] = [actor, action_channel]
+        # actor.control_edges[idx] = []  # default empty, not controlled
 
     def tick(self, steps=1):
         """
@@ -56,9 +59,32 @@ class Arena:
             # a history update is [controls, actions, feedback, percept]
 
     def act_cycle(self):
-        for actor_id in self.order:
-            action = self.actors[actor_id].act(
-                self.history_mgr.history(self.actors[actor_id]))
+        # start a new decision vector
+        # decision_vector[actor] = [actions for complete action_space]
+        decision_matrix = defaultdict(dict)
+        # for each i in actor.control_edges[idx]['action_channels']:
+        # decision_vector[actor.control_edges[idx]['actor']][i]
+        # go through each actor
+        for actor in self.actors:
+            # generate the control vector for this actor
+            # provide it with the current history and control vector
+            # let it react to the decision_vector
+            # go over complete control space
+            # get actions (controls) from another actors
+            # produce random samples where necessary (for uncontrolled channels)
+            control_vector = actor.random_control_vector()
+            for link in actor.control_links:
+                for ca_pair in link['ca_pairs']:
+                    control_vector[ca_pair['control']
+                                   ] = decision_matrix[link['actor']][ca_pair['action']]
+
+            # pass the pre-decision information vector along with the history to the actor
+            # the actor (re-)acts to the provided information
+            action_vector = actor.act(
+                self.history_mgr[actor].history, control_vector)
+            # add new action information to decision information vector of this step
+            decision_matrix[actor] = action_vector
+        return decision_matrix
 
     def interact(self):
         # make a (None) decision vector
@@ -125,7 +151,7 @@ class Arena:
 
     def deregister(self, actors): pass
 
-    def schemata(self, pre_schema, post_schema=None, post_schema_is_identity=True):
+    def get_schemata(self, pre_schema, post_schema=None, post_schema_is_identity=True):
         # each actor can indicate to observe other actors' actions
         # a valid allocation should not have any self-observations (i.e. the diagonal should be zero)
         # make sure schema is of valid size
@@ -222,8 +248,12 @@ class Actor(abc.ABC):
         self.messages = list()
         self.history_maxlen = self.kwargs.get('history_maxlen', 10)
         # actors is controlling any part of `control_space`
+        # key: control_channel index
+        # value: controlling actor
         self.controlers = dict()
-        # actors being controlled by these actors
+        # actors being controlled by this actor
+        # key: action_channel index
+        # value: controlled actor
         self.controlled = dict()
         # controllers and controlled should be disjoint!!!
 
@@ -254,7 +284,7 @@ class Actor(abc.ABC):
         # env produces (feedback_space, action_space) at output, (e, None)
         return self
 
-    def is_controlled(self, actor):
+    def controlling(self, actor):
         """
         check through the control chain
         """
@@ -263,7 +293,7 @@ class Actor(abc.ABC):
             return True
         # check further down the line
         for controlled_actor in self.controlled.values():
-            if controlled_actor.is_controlled(actor):
+            if controlled_actor.controlling(actor):
                 return True
         # not controlled anywhere in the hierarchy
         return False
@@ -271,7 +301,7 @@ class Actor(abc.ABC):
     def controlled_by(self, actor, control_channels=[]):
         # the input actor (actor) must not be controlled by the current actor (self)
         # otherwise it will create a cycle in the control mechanism
-        if self.is_controlled(actor):
+        if self.controlling(actor):
             raise RuntimeError(
                 "The actor is already being controlled by the current actor.")
         # request all control channels
@@ -327,7 +357,24 @@ class Actor(abc.ABC):
 
         return self
 
-    def act(self, history, pre_decision_info):
+    def random_sample(channel):
+        rng = np.random.default_rng()
+        if isinstance(channel, helpers.Reals):
+            return rng.standard_gamma(1)
+        if isinstance(channel, helpers.Naturals):
+            return rng.geometric(0.5) - 1
+        if isinstance(channel, helpers.Sequence):
+            return rng.choice(range(channel.len))
+        if isinstance(channel, helpers.Interval):
+            return rng.uniform(0.0, channel.len)
+
+    def random_control_vector(self):
+        c_vec = []
+        for idx in range(len(self.control_space)):
+            c_vec.append(self.random_sample(self.control_space[idx]))
+        return c_vec
+
+    def act(self, history, controls):
         # pre_decision_info should "agree" with the input space
         # output space is "received" from another actors
         pass
@@ -424,6 +471,9 @@ if __name__ == "__main__":
 
     agentA = Actor('AgentA')
     agentB = Actor('AgentB')
+    ab = dict()
+    ab[agentA] = agentB
+
     pd = Actor('PD')
     pd.control_space = [helpers.Naturals(), helpers.Interval(2.0)]
     pd.feedback_space = pd.control_space
