@@ -59,32 +59,46 @@ class Arena:
             # a history update is [controls, actions, feedback, percept]
 
     def act_cycle(self):
-        # start a new decision vector
-        # decision_vector[actor] = [actions for complete action_space]
-        decision_matrix = defaultdict(dict)
-        # for each i in actor.control_edges[idx]['action_channels']:
-        # decision_vector[actor.control_edges[idx]['actor']][i]
+        # start a new decision matrix
+        # structure:
+        #   decision_matrix[actor] = [action vector from action_space]
+        decision_matrix = defaultdict(list)
         # go through each actor
+        # assuming the actors are in order
         for actor in self.actors:
-            # generate the control vector for this actor
-            # provide it with the current history and control vector
-            # let it react to the decision_vector
-            # go over complete control space
-            # get actions (controls) from another actors
-            # produce random samples where necessary (for uncontrolled channels)
+            # generate a "random" control vector just in case nobody is controling
             control_vector = actor.random_control_vector()
-            for link in actor.control_links:
-                for ca_pair in link['ca_pairs']:
-                    control_vector[ca_pair['control']
-                                   ] = decision_matrix[link['actor']][ca_pair['action']]
-
-            # pass the pre-decision information vector along with the history to the actor
-            # the actor (re-)acts to the provided information
+            # check the links
+            # if the actor is being controlled
+            for controller in actor.inward_control_links.keys():
+                # there is a controller
+                # the links are stored as control-action channel pairs
+                for c_ch, a_ch in actor.inward_control_links[controller]:
+                    # get the action from controller to the actor
+                    control_vector[c_ch] = decision_matrix[controller][a_ch]
+            # update control_vector for current cycle
+            self.history_mgr[actor].control_vector = control_vector
+            # let the actor act on its controls and current history
             action_vector = actor.act(
                 self.history_mgr[actor].history, control_vector)
+            # update action_vector for current cycle
+            self.history_mgr[actor].action_vector = action_vector
             # add new action information to decision information vector of this step
             decision_matrix[actor] = action_vector
         return decision_matrix
+
+    def response_cycle(self):
+        # we (should) have all actions for this cycle
+        # these are stored in self.history_mgr[actor].action_vector
+        response_matrix = defaultdict(list)
+        for actor in self.actors:
+            feedback_vector = actor.response(
+                self.history_mgr[actor].history, self.history_mgr[actor].control_vector)
+            self.history_mgr[actor].feedback_vector = feedback_vector
+            response_matrix[actor] = feedback_vector
+        # prepare the percept vector for each actor
+        for actor in self.actors:
+            percept_vector =
 
     def interact(self):
         # make a (None) decision vector
@@ -241,36 +255,35 @@ class Arena:
 
 
 class Actor(abc.ABC):
+
     def __init__(self, name=None, *args, **kwargs):
+        # save a local copy of args and kwargs
         self.args = args
         self.kwargs = kwargs
+        # naming the actor to some meaningful way
         self.name = 'actor_{}'.format(id(self)) if name is None else name
-        self.messages = list()
+        # overridable maximum history length
         self.history_maxlen = self.kwargs.get('history_maxlen', 10)
-        # actors is controlling any part of `control_space`
-        # key: control_channel index
-        # value: controlling actor
-        self.controlers = dict()
-        # actors being controlled by this actor
-        # key: action_channel index
-        # value: controlled actor
-        self.controlled = dict()
-        # controllers and controlled should be disjoint!!!
 
-        # actors providing feedback into `percept_space`
-        self.influencers = dict()
+        self.externally_controlled_channels = set()
+        self.messages = list()
 
         # inward signals
-        self.control_space = [helpers.Sequence()]  # a_in default control
-        # [('real', math.inf), ('real', 1.0), ('natural', math.inf), ('natural', 10)]
-        # [Reals(), Interval(1.0), Naturals(), Sequence(10)]
-        self.percept_space = []  # e_in
-
+        self.control_space = [helpers.Sequence(1)]  # a_in default control
+        self.percept_space = []  # <from second person> e_in
         # outward signals
-        self.feedback_space = [helpers.Interval()]  # a_out
-        # [('natural', math.inf)]
-        # [Naturals()]
+        self.feedback_space = [helpers.Sequence(1)]  # a_out default feedback
         self.action_space = []  # <from second person> e_out
+
+        # list of control and influence links
+        # structure:
+        #   *_control_links = {actor_1: {(2,2),(1,2),(0,0)}, actor_2: {...}, ...}
+        self.inward_control_links = defaultdict(set)
+        self.outward_control_links = defaultdict(set)
+        # structure:
+        #   *_influence_links = {actor_1: {(2,2,'action'),(1,2,'feedback')}, actor_2: {...}, ...}
+        self.inward_influence_links = defaultdict(set)
+        self.outward_influence_links = defaultdict(set)
 
     def says(self, message):
         return True if self.messages.contains(message) else False
@@ -284,24 +297,24 @@ class Actor(abc.ABC):
         # env produces (feedback_space, action_space) at output, (e, None)
         return self
 
-    def controlling(self, actor):
+    def is_controlling(self, actor):
         """
         check through the control chain
         """
         # the actor is in the controlled list
-        if actor in self.controlled.values():
+        if actor in self.outward_control_links.keys():
             return True
         # check further down the line
-        for controlled_actor in self.controlled.values():
+        for controlled_actor in self.outward_control_links.keys():
             if controlled_actor.controlling(actor):
                 return True
         # not controlled anywhere in the hierarchy
         return False
 
-    def controlled_by(self, actor, control_channels=[]):
+    def controlled_by(self, controller, control_channels=[]):
         # the input actor (actor) must not be controlled by the current actor (self)
         # otherwise it will create a cycle in the control mechanism
-        if self.controlling(actor):
+        if self.is_controlling(controller):
             raise RuntimeError(
                 "The actor is already being controlled by the current actor.")
         # request all control channels
@@ -311,13 +324,18 @@ class Actor(abc.ABC):
         if not set(control_channels) <= set(range(len(self.control_space))):
             raise RuntimeError("The requested channels are not valid.")
         # all channels are available
-        if any(key in self.controlers for key in control_channels):
+        if any(ch in self.externally_controlled_channels for ch in control_channels):
             raise RuntimeError("The requested channel is already allocated.")
         # allot the requested channels
-        for channel in control_channels:
-            self.controlers[channel] = actor
-            actor.controlled[len(actor.action_space)] = self
-            actor.action_space.append(self.control_space[channel])
+        for c_channel in control_channels:
+            # assumption: action-space is added to the controller not selected by the controller
+            a_channel = len(controller.action_space)
+            controller.action_space.append(self.control_space[c_channel])
+            # store inward and outward links
+            self.inward_control_links[controller].add((c_channel, a_channel))
+            controller.outward_control_links[self].add((a_channel, c_channel))
+            # mark the control channel as controlled
+            self.externally_controlled_channels.add(c_channel)
         # return `self` so the function calls may be chained
         return self
 
@@ -329,9 +347,6 @@ class Actor(abc.ABC):
         make sure the channels in its own control are not listed in the influenced list
         this information is populated after every agent has taken their actions
         """
-        # assert actor
-        if not isinstance(actor, Actor):
-            raise RuntimeError("{} is not an actor.".format(actor))
         # request all channels
         if not action_channels and not feedback_channels:
             action_channels = range(len(actor.action_space))
@@ -343,18 +358,23 @@ class Actor(abc.ABC):
         if not set(feedback_channels) <= set(range(len(actor.feedback_space))):
             raise RuntimeError(
                 "The requested feedback channels are not valid.")
-        # remove any action channel already allocated to a control channel
-        channels = [k for k, v in self.controlers.items() if v == actor]
-        action_channels = [x for x in action_channels if x not in channels]
-        for channel in action_channels:
-            self.influencers[len(self.influencers)] = [
-                actor, 'action', channel]
-            self.percept_space.append(actor.action_space[channel])
-        for channel in feedback_channels:
-            self.influencers[len(self.influencers)] = [
-                actor, 'feedback', channel]
-            self.percept_space.append(actor.feedback_space[channel])
 
+        # remove any action channel already allocated to a control channel
+        channels = [ch for ch, _ in self.inward_control_links[actor]]
+        action_channels = [ch for ch in action_channels if ch not in channels]
+
+        # allocate channels to percept_space
+        for a_ch in action_channels:
+            p_ch = len(self.percept_space)
+            self.inward_influence_links[actor].add(p_ch, a_ch, 'action')
+            actor.outward_influence_links[self].add(a_ch, p_ch, 'action')
+            self.percept_space.append(actor.action_space[a_ch])
+        for f_ch in feedback_channels:
+            p_ch = len(self.percept_space)
+            self.inward_influence_links[actor].add(p_ch, f_ch, 'feedback')
+            actor.outward_influence_links[self].add(f_ch, p_ch, 'feedback')
+            self.percept_space.append(actor.feedback_space[f_ch])
+        # return `self` so the function calls may be chained
         return self
 
     def random_sample(channel):
@@ -382,7 +402,7 @@ class Actor(abc.ABC):
     def state(self, history, pre_decision_info):
         return history[-1]
 
-    def response(self, history, pre_decision_info):
+    def response(self, history, controls):
         pass
 
     def evaluate(self, history, pre_decision_info, decision): pass
