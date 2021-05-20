@@ -2,6 +2,7 @@ import numpy as np
 import abc
 import helpers
 from collections import defaultdict
+import utils
 
 
 class Arena:
@@ -49,9 +50,6 @@ class Arena:
         """
         for step in range(steps):
             # populate the decision vector from all actors
-            decision_vector = self.interact()
-            # update histories using the current decision vector
-            self.update(decision_vector)
 
             # history update for any actor is:
             # controls, actions, feedbacks, percepts
@@ -82,7 +80,8 @@ class Arena:
         # assuming the actors are in order
         for actor in self.actors:
             # generate a "random" control vector just in case nobody is controling
-            control_vector = actor.random_control_vector()
+            control_vector = [utils.random_sample(
+                c) for c in actor.control_space]
             # check the links
             # if the actor is being controlled
             for controller in actor.inward_control_links.keys():
@@ -137,7 +136,7 @@ class Arena:
                 continue
             # register every controller of the actor
             # because the arena can't function without the controllers
-            self.register(*actor.controlers.values())
+            self.register(*actor.inward_control_links.keys())
             # check if the actor can be registered
             self.actors.append(actor)
             self.history_mgr[actor] = helpers.HistoryManager(
@@ -160,7 +159,7 @@ class Actor(abc.ABC):
         self.history_maxlen = self.kwargs.get('history_maxlen', 10)
 
         self.externally_controlled_channels = set()
-        self.messages = list()
+        self.messages = []
 
         # inward signals
         self.control_space = [helpers.Sequence(1)]  # a_in default control
@@ -254,50 +253,35 @@ class Actor(abc.ABC):
                 "The requested feedback channels are not valid.")
 
         # remove any action channel already allocated to a control channel
-        channels = [ch for ch, _ in self.inward_control_links[actor]]
+        if actor in self.inward_control_links.keys():
+            # if condition to potentially remove empty list keys in the control list
+            channels = [ch for ch, _ in self.inward_control_links[actor]]
         action_channels = [ch for ch in action_channels if ch not in channels]
 
         # allocate channels to percept_space
         for a_ch in action_channels:
             p_ch = len(self.percept_space)
-            self.inward_influence_links[actor].add(p_ch, a_ch, 'action')
-            actor.outward_influence_links[self].add(a_ch, p_ch, 'action')
+            self.inward_influence_links[actor].add((p_ch, a_ch, 'action'))
+            actor.outward_influence_links[self].add((a_ch, p_ch, 'action'))
             self.percept_space.append(actor.action_space[a_ch])
         for f_ch in feedback_channels:
             p_ch = len(self.percept_space)
-            self.inward_influence_links[actor].add(p_ch, f_ch, 'feedback')
-            actor.outward_influence_links[self].add(f_ch, p_ch, 'feedback')
+            self.inward_influence_links[actor].add((p_ch, f_ch, 'feedback'))
+            actor.outward_influence_links[self].add((f_ch, p_ch, 'feedback'))
             self.percept_space.append(actor.feedback_space[f_ch])
         # return `self` so the function calls may be chained
         return self
 
-    def random_sample(channel):
-        rng = np.random.default_rng()
-        if isinstance(channel, helpers.Reals):
-            return rng.standard_gamma(1)
-        if isinstance(channel, helpers.Naturals):
-            return rng.geometric(0.5) - 1
-        if isinstance(channel, helpers.Sequence):
-            return rng.choice(range(channel.len))
-        if isinstance(channel, helpers.Interval):
-            return rng.uniform(0.0, channel.len)
-
-    def random_control_vector(self):
-        c_vec = []
-        for idx in range(len(self.control_space)):
-            c_vec.append(self.random_sample(self.control_space[idx]))
-        return c_vec
-
     def act(self, history, controls):
         # pre_decision_info should "agree" with the input space
         # output space is "received" from another actors
-        pass
+        return [utils.random_sample(a) for a in self.action_space], [utils.random_sample(f) for f in self.feedback_space]
 
     def state(self, history, pre_decision_info):
         return history[-1]
 
     def response(self, history, controls):
-        pass
+        return [utils.random_sample(f) for f in self.feedback_space]
 
     def evaluate(self, history, pre_decision_info, decision): pass
     # the size of returned evaluation should match pre_decision_info
@@ -373,20 +357,27 @@ class Actor(abc.ABC):
 
 if __name__ == "__main__":
 
+    rl = Arena()
+
     agent = Actor('Agent007')
     domain = Actor('Starship')
+
     domain.control_space = [helpers.Reals(), helpers.Naturals(
     ), helpers.Sequence(10), helpers.Interval(2.0)]
     domain.feedback_space = [
         helpers.Naturals(), helpers.Sequence(2), helpers.Interval(2.0)]
 
     domain.controlled_by(agent)
-    agent.influenced_by(domain, feedback_channels=[0, 2])
+    agent.influenced_by(domain)
+
+    rl.register(agent)
+    rl.register(domain)
+
+    for n in range(15):
+        rl.tick()
 
     agentA = Actor('AgentA')
     agentB = Actor('AgentB')
-    ab = dict()
-    ab[agentA] = agentB
 
     pd = Actor('PD')
     pd.control_space = [helpers.Naturals(), helpers.Interval(2.0)]
