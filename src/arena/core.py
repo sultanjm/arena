@@ -29,6 +29,17 @@ class Arena:
         # actor.control_edges[idx] = [actor, action_channel]
         # actor.control_edges[idx] = []  # default empty, not controlled
 
+        self.history_mgr = defaultdict(helpers.HistoryManager)
+
+        # structure:
+        #   decision_matrix[actor] = [action vector from action_space]
+        #   response_matrix[actor] = [feedback vector from feedback_space]
+        #   percept_matrix[actor]  = [action & feedback vector from percept_space]
+        self.decision_matrix = defaultdict(list)
+        self.response_matrix = defaultdict(list)
+        self.percept_matrix = defaultdict(list)
+        self.steps = 0
+
     def tick(self, steps=1):
         """
         go through each registered actor's act function
@@ -49,20 +60,24 @@ class Arena:
             # act cycle
             self.act_cycle()
             # histroy + controls --> actions (-> controls)
-            # response cycle
-            self.response_cycle()
             # history + controls + actions --> feedback (-> percepts)
             # evaluate each control at the history (dispatch to every controller)
             # learn cycle
             self.learn_cycle()
             # history + controls + actions + feedback + percept --> history
             # a history update is [controls, actions, feedback, percept]
+            # a history tuple is of len(control_space) + len(action_space) + len(feedback_space) + len(percept_space) long
+            self.steps += 1
 
     def act_cycle(self):
         # start a new decision matrix
         # structure:
         #   decision_matrix[actor] = [action vector from action_space]
+        #   response_matrix[actor] = [feedback vector from feedback_space]
+        #   percept_matrix[actor]  = [action & feedback vector from percept_space]
         decision_matrix = defaultdict(list)
+        response_matrix = defaultdict(list)
+        percept_matrix = defaultdict(list)
         # go through each actor
         # assuming the actors are in order
         for actor in self.actors:
@@ -79,73 +94,37 @@ class Arena:
             # update control_vector for current cycle
             self.history_mgr[actor].control_vector = control_vector
             # let the actor act on its controls and current history
-            action_vector = actor.act(
+            action_vector, feedback_vector = actor.act(
                 self.history_mgr[actor].history, control_vector)
             # update action_vector for current cycle
             self.history_mgr[actor].action_vector = action_vector
-            # add new action information to decision information vector of this step
-            decision_matrix[actor] = action_vector
-        return decision_matrix
-
-    def response_cycle(self):
-        # we (should) have all actions for this cycle
-        # these are stored in self.history_mgr[actor].action_vector
-        response_matrix = defaultdict(list)
-        for actor in self.actors:
-            feedback_vector = actor.response(
-                self.history_mgr[actor].history, self.history_mgr[actor].control_vector)
+            # update feedback_vector for current cycle
             self.history_mgr[actor].feedback_vector = feedback_vector
+            # add new action information to decision information matrix of this step
+            decision_matrix[actor] = action_vector
+            # add new feedback information to feedback information matrix of this step
             response_matrix[actor] = feedback_vector
-        # prepare the percept vector for each actor
+        # generate percepts
         for actor in self.actors:
-            percept_vector =
+            percept_vector = [None] * len(actor.percept_space)
+            for influencer in actor.inward_influence_links.keys():
+                for p_ch, i_ch, ch_type in actor.inward_influence_links[influencer]:
+                    percept_vector[p_ch] = decision_matrix[influencer][i_ch] if ch_type == 'action' else response_matrix[influencer][i_ch]
+            # update feedback_vector for current cycle
+            self.history_mgr[actor].percept_vector = percept_vector
+            percept_matrix[actor] = percept_vector
 
-    def interact(self):
-        # make a (None) decision vector
-        decision_vector = [None] * len(self.actors)
-        # go through each actor
-        for idx, actor_id in enumerate(self.order):
-            # get the sorted by order mask for pre-decision information for the actor
-            pre_decision_mask = (self.pre_decision_schema[actor_id])[
-                self.order]
-            # extract only the "active" information bits
-            pre_decision_info = [decision_vector[x]
-                                 for x in range(len(self.actors)) if pre_decision_mask[x]]
-            # pass the pre-decision information vector along with the history to the actor
-            # the actor (re-)acts to the provided information
-            action = self.actors[actor_id].act(
-                self.history_mgr.history(self.actors[actor_id]), pre_decision_info)
-            # add new action information to decision information vector of this step
-            decision_vector[idx] = action
-        return decision_vector
+        self.decision_matrix = decision_matrix
+        self.response_matrix = response_matrix
+        self.percept_matrix = percept_matrix
 
-    def update(self, decision_vector):
-        # all registered actors have taken their actions for this step
-        for idx, actor_id in enumerate(self.order):
-            # get the sorted by order mask for post-decision information for the actor
-            post_decision_mask = (self.post_decision_schema[actor_id])[
-                self.order]
-            # extract only the "active" information bits
-            post_decision_info = [decision_info[x]
-                                  for x in range(len(self.actors)) if post_decision_mask[x]]
-            # pass the post-decision information vector along with the history to the actor
-            # go through the decision information vector to update history for each actor
-            self.history_mgr.update(self.actors[actor_id], post_decision_info)
-            # invoke learn() function for each actor
-            self.actors[actor_id].learn(
-                self.history_mgr.history(self.actors[actor_id]))
+        return self
 
-    def register2(self, actors):
-        """
-        register actors to the helpers
-        initiate history managers for each actor
-        """
+    def learn_cycle(self):
         for actor in self.actors:
-            if not isinstance(actor, Actor):
-                raise RuntimeError("{} is not an actor.".format(actor))
-            self.actors.append(actor)
-            self.history_mgr[id(actor)] = helpers.HistoryManager(
-                history_maxlen=actor.history_maxlen)
+            self.history_mgr[actor].record()
+            actor.learn(self.history_mgr[actor].history)
+        return self
 
     def register(self, *actors):
         """
@@ -161,95 +140,10 @@ class Arena:
             self.register(*actor.controlers.values())
             # check if the actor can be registered
             self.actors.append(actor)
-            # self.history_mgr[id(actor)] = helpers.HistoryManager(history_maxlen=actor.history_maxlen)
+            self.history_mgr[actor] = helpers.HistoryManager(
+                history_maxlen=actor.history_maxlen)
 
     def deregister(self, actors): pass
-
-    def get_schemata(self, pre_schema, post_schema=None, post_schema_is_identity=True):
-        # each actor can indicate to observe other actors' actions
-        # a valid allocation should not have any self-observations (i.e. the diagonal should be zero)
-        # make sure schema is of valid size
-        # calculate the execution order
-        # a0: 0 0 0
-        # a1: 1 0 0
-        # en: 0 1 0
-        # {0:actor1, 1:actor4, 2:actor0}
-        # {0:[], 1:[actor1], 2:[actor1,actor4]}
-        # extract "default" information schema from order schema
-
-        # a valid order schema should satisfy the following conditions:
-        # 1. there must exist at least one zero column, (~schema.T.any(axis=1)).sum() > 0
-        # 2. there must exist at least one zero row, (~schema.any(axis=1)).sum() > 0
-        # 3. the diagonal must be zero, schema.trace() = 0
-        # 4. there is no "race" between actor, which means cross diagonal values of
-        #    any (non-terminal) pair of actors are not simultaneously active, np.bitwise_and(schema,schema.T).sum() == 0
-
-        pre_schema = np.array(pre_schema)
-
-        if pre_schema.shape != [len(self.actors)] * 2:
-            raise RuntimeError(
-                "Pre-decision schema does not have valid dimensions.")
-
-        if (~pre_schema.any(axis=1)).sum() == 0:
-            raise RuntimeError(
-                "Order schema does not have any zero row. There is no actor to put at the start of the order.")
-
-        if (~pre_schema.T.any(axis=1)).sum() == 0:
-            raise RuntimeError(
-                "Order schema does not have any zero column. There is no actor to put at the end of the order.")
-
-        if pre_schema.trace() != 0:
-            raise RuntimeError(
-                "Order schema has non-zero trace. There is at least one actor which is observing its own action.")
-
-        if np.bitwise_and(pre_schema, pre_schema.T).sum() != 0:
-            raise RuntimeError(
-                "There is a race between a pair of actors. They both want to observe each others actions.")
-
-        # after validating, we can follow the blew (neat) algorithm to get an order
-        # note: the order is non-unique
-        # get the index (idx) of ANY zero row
-        # append this index in a list
-        # remove this row and corresponding column, np.delete(np.delete(schema, idx, 0), idx, 1)
-        # continue until no more entries are left
-
-        tmp_actors = list(range(len(pre_schema)))
-        tmp_schema = np.copy(pre_schema)
-        self.order = list()
-        while len(tmp_actors):
-            idx = np.where(~tmp_schema.any(axis=1))[0][0]
-            self.order.append(tmp_actors[idx])
-            tmp_actors = np.delete(tmp_actors, idx)
-            tmp_schema = np.delete(np.delete(tmp_schema, idx, 0), idx, 1)
-
-        # save a local copy of the schema
-        self.pre_schema = pre_schema
-        # afterwards, we can access the pre-decision information set of each actor as
-        # (self.schema[self.order[idx]])[self.order]
-        # for each idx
-        # check if post-decision information schema is provided.
-        if post_schema is None:
-            if post_schema_is_identity:
-                # we use "all observations" as default
-                post_schema = np.ones([len(self.actors)] * 2)
-            else:
-                # this schema is always pre-decision information schema + identity + extra info
-                post_schema = pre_schema + np.eye(len(self.actors))
-
-        if post_schema.shape != [len(self.actors)] * 2:
-            raise RuntimeError(
-                "Post-decision schema does not have valid dimensions.")
-
-        if post_schema.trace() != len(self.actors):
-            raise RuntimeError(
-                "Post-decision schema has invalid trace. Each actor should have its own action as a post-decision information.")
-
-        if not np.all(np.multiply((pre_schema != 0), post_schema) == (pre_schema != 0)):
-            raise RuntimeError(
-                "Post-decision schema does not contain pre-decision schema.")
-
-        # save a local copy of post-decision information schema
-        self.post_schema = post_schema
 
     def stats(self): pass
 
