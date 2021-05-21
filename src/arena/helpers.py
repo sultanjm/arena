@@ -140,26 +140,49 @@ class RewardManager:
 
 
 class Space(abc.ABC):
-    def __init__(self, *args, **kwargs):
-        self.args = args
-        self.kwargs = kwargs
+    def __init__(self, name=None):
+        self.name = 'id:{}'.format(id(self)) if name is None else name
 
+    @abc.abstractmethod
+    def random_sample(self):
+        pass
 
-class Interval(Space):
-    def __init__(self, len=1.0):
-        self.len = len
-        super().__init__(self)
+# control_space = [Reals('pos_x'), Reals('pos_y')]
+# feedback_space = [Sequence(['okay', 'danger'], name='status'), Sequence(len=10, name='levels')]
+# feedback_space = [Sequence(10,'levels')]
 
-
-class Naturals(Space):
-    pass
+# Sequence.labels(['x','y'], 'status')
+# Sequence(range(10), 'levels')
+# Sequence(['okay', 'danger'], 'status')
 
 
 class Sequence(Space):
-    def __init__(self, len=1):
-        self.len = len
-        super().__init__(self)
+    def __init__(self, labels=[], *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.labels = labels
+        self.len = len(self.labels)
+
+    def random_sample(self):
+        # random sample is the index not the label
+        return np.random.default_rng().choice(range(self.len))
+
+
+class Interval(Space):
+    def __init__(self, range=(0.0, 1.0), *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.min = min(range)
+        self.max = max(range)
+        self.len = self.max - self.min
+
+    def random_sample(self):
+        return np.random.default_rng().uniform(self.min, self.max)
+
+
+class Naturals(Space):
+    def random_sample(self):
+        return np.random.default_rng().geometric(0.5) - 1
 
 
 class Reals(Space):
-    pass
+    def random_sample(self):
+        return np.random.default_rng().standard_gamma(1)

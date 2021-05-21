@@ -80,8 +80,7 @@ class Arena:
         # assuming the actors are in order
         for actor in self.actors:
             # generate a "random" control vector just in case nobody is controling
-            control_vector = [utils.random_sample(
-                c) for c in actor.control_space]
+            control_vector = [c.random_sample() for c in actor.control_space]
             # check the links
             # if the actor is being controlled
             for controller in actor.inward_control_links.keys():
@@ -162,10 +161,10 @@ class Actor(abc.ABC):
         self.messages = []
 
         # inward signals
-        self.control_space = [helpers.Sequence(1)]  # a_in default control
+        self.control_space = []  # a_in default control
         self.percept_space = []  # <from second person> e_in
         # outward signals
-        self.feedback_space = [helpers.Sequence(1)]  # a_out default feedback
+        self.feedback_space = []  # a_out default feedback
         self.action_space = []  # <from second person> e_out
 
         # list of control and influence links
@@ -275,13 +274,13 @@ class Actor(abc.ABC):
     def act(self, history, controls):
         # pre_decision_info should "agree" with the input space
         # output space is "received" from another actors
-        return [utils.random_sample(a) for a in self.action_space], [utils.random_sample(f) for f in self.feedback_space]
+        return [a.random_sample() for a in self.action_space], [f.random_sample() for f in self.feedback_space]
 
     def state(self, history, pre_decision_info):
         return history[-1]
 
     def response(self, history, controls):
-        return [utils.random_sample(f) for f in self.feedback_space]
+        return [f.random_sample() for f in self.feedback_space]
 
     def evaluate(self, history, pre_decision_info, decision): pass
     # the size of returned evaluation should match pre_decision_info
@@ -361,11 +360,10 @@ if __name__ == "__main__":
 
     agent = Actor('Agent007')
     domain = Actor('Starship')
-
-    domain.control_space = [helpers.Reals(), helpers.Naturals(
-    ), helpers.Sequence(10), helpers.Interval(2.0)]
-    domain.feedback_space = [
-        helpers.Naturals(), helpers.Sequence(2), helpers.Interval(2.0)]
+    domain.control_space = [helpers.Sequence(range(10), 'levels'), helpers.Sequence([
+        'low', 'moderate', 'high'], 'status')]
+    domain.feedback_space = [helpers.Naturals(), helpers.Sequence(
+        range(2)), helpers.Interval((-2.0, 2.0))]
 
     domain.controlled_by(agent)
     agent.influenced_by(domain)
