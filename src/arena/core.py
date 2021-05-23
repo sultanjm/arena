@@ -1,132 +1,107 @@
+from . import helpers
+
+from collections import defaultdict
 import numpy as np
 import abc
-import helpers
-from collections import defaultdict
-import utils
 
 
 class Arena:
-    def __init__(self, *args, **kwargs):
-        # local copy of args and kwargs
-        self.args = args
-        self.kwargs = kwargs
-        # history managers for every actor
-        # self.history_mgr = helpers.HistoryManager()
+    """
+    arena for agents to interact
+    """
+
+    def __init__(self, name=None, *args, **kwargs):
+        # name the arena
+        self.name = 'arena:{}'.format(id(self)) if name is None else name
+        # list of actors in order
         self.actors = list()
-        self.pre_decision_schema = list()
-        self.post_decision_schema = list()
-        self.order = list()
-        # self.schemata[actor_A]['controls'][actor_B] = [B's control_channels idx]
-        # self.schemata[actor_A]['acts'][actor_B] = [A's action_channels idx]
-
-        # self.control_schema[actor_A][actor_B] = [A's control_channels idx]
-        # self.action_schema[actor_A][actor_B] = [A's action_channels idx]
-        self.schemata = defaultdict(dict)
-
-        # self.control_edges[actor_A][actor_B] = [(A's action_channel, B's control_channel)]
-        self.control_edges = defaultdict(dict)
-
-        # for each idx in range(control_space)
-        # actor.control_edges[idx] = [actor, action_channel]
-        # actor.control_edges[idx] = []  # default empty, not controlled
-
+        # list of history managers for every actor
         self.history_mgr = defaultdict(helpers.HistoryManager)
-
-        # structure:
-        #   decision_matrix[actor] = [action vector from action_space]
-        #   response_matrix[actor] = [feedback vector from feedback_space]
-        #   percept_matrix[actor]  = [action & feedback vector from percept_space]
-        self.decision_matrix = defaultdict(list)
-        self.response_matrix = defaultdict(list)
-        self.percept_matrix = defaultdict(list)
+        # interaction steps
         self.steps = 0
 
     def tick(self, steps=1):
         """
-        go through each registered actor's act function
-        prepare pre-decision information vector for each actor
-        prepare post-decision information updates
-        extend histories with post-decision information
+        performs a single interaction cycle
+        loops through the registered actors
+        provides relevent controls to the actors
+        prepare percepts for them
+        let every actor learn from history
         """
         for step in range(steps):
-            # populate the decision vector from all actors
 
-            # history update for any actor is:
-            # controls, actions, feedbacks, percepts
+            # controls are coming through from another actors (controllers)
             # controls <= from preceding actors
+            # actions are dispatched to other actors
             # actions => to succeeding actors
-            # act cycle
-            self.act_cycle()
+            # in act cycle:
             # histroy + controls --> actions (-> controls)
             # history + controls + actions --> feedback (-> percepts)
             # evaluate each control at the history (dispatch to every controller)
-            # learn cycle
-            self.learn_cycle()
+            # learn cycle:
             # history + controls + actions + feedback + percept --> history
             # a history update is [controls, actions, feedback, percept]
             # a history tuple is of len(control_space) + len(action_space) + len(feedback_space) + len(percept_space) long
+
+            # start a new decision matrix
+            # structure:
+            #   decision_matrix[actor] = [action vector from action_space]
+            #   response_matrix[actor] = [feedback vector from feedback_space]
+            #   percept_matrix[actor]  = [action & feedback vector from percept_space]
+            decision_matrix = defaultdict(list)
+            response_matrix = defaultdict(list)
+            percept_matrix = defaultdict(list)
+            # go through each actor
+            # assuming the actors are in order
+            for actor in self.actors:
+                # generate a "random" control vector just in case nobody is controling
+                control_vector = [c.random_sample()
+                                  for c in actor.control_space]
+                # check the links
+                # if the actor is being controlled
+                for controller in actor.inward_control_links.keys():
+                    # there is a controller
+                    # the links are stored as control-action channel pairs
+                    for c_ch, a_ch in actor.inward_control_links[controller]:
+                        # get the action from controller to the actor
+                        control_vector[c_ch] = decision_matrix[controller][a_ch]
+                # update control_vector for current cycle
+                self.history_mgr[actor].control_vector = control_vector
+                # let the actor act on its controls and current history
+                action_vector = actor.act(
+                    self.history_mgr[actor].history, control_vector)
+                feedback_vector = actor.respond(
+                    self.history_mgr[actor].history, control_vector, action_vector)
+                # update action_vector for current cycle
+                self.history_mgr[actor].action_vector = action_vector
+                # update feedback_vector for current cycle
+                self.history_mgr[actor].feedback_vector = feedback_vector
+                # add new action information to decision information matrix of this step
+                decision_matrix[actor] = action_vector
+                # add new feedback information to feedback information matrix of this step
+                response_matrix[actor] = feedback_vector
+            # generate percepts
+            # learn from current iteration using the information
+            for actor in self.actors:
+                percept_vector = [None] * len(actor.percept_space)
+                for influencer in actor.inward_influence_links.keys():
+                    for p_ch, i_ch, ch_type in actor.inward_influence_links[influencer]:
+                        percept_vector[p_ch] = decision_matrix[influencer][i_ch] if ch_type == 'action' else response_matrix[influencer][i_ch]
+                # update feedback_vector for current cycle
+                self.history_mgr[actor].percept_vector = percept_vector
+                percept_matrix[actor] = percept_vector
+                # record the current interaction
+                self.history_mgr[actor].record()
+                # learn from the history
+                actor.learn(self.history_mgr[actor].history)
+            # done with the current step
             self.steps += 1
-
-    def act_cycle(self):
-        # start a new decision matrix
-        # structure:
-        #   decision_matrix[actor] = [action vector from action_space]
-        #   response_matrix[actor] = [feedback vector from feedback_space]
-        #   percept_matrix[actor]  = [action & feedback vector from percept_space]
-        decision_matrix = defaultdict(list)
-        response_matrix = defaultdict(list)
-        percept_matrix = defaultdict(list)
-        # go through each actor
-        # assuming the actors are in order
-        for actor in self.actors:
-            # generate a "random" control vector just in case nobody is controling
-            control_vector = [c.random_sample() for c in actor.control_space]
-            # check the links
-            # if the actor is being controlled
-            for controller in actor.inward_control_links.keys():
-                # there is a controller
-                # the links are stored as control-action channel pairs
-                for c_ch, a_ch in actor.inward_control_links[controller]:
-                    # get the action from controller to the actor
-                    control_vector[c_ch] = decision_matrix[controller][a_ch]
-            # update control_vector for current cycle
-            self.history_mgr[actor].control_vector = control_vector
-            # let the actor act on its controls and current history
-            action_vector, feedback_vector = actor.act(
-                self.history_mgr[actor].history, control_vector)
-            # update action_vector for current cycle
-            self.history_mgr[actor].action_vector = action_vector
-            # update feedback_vector for current cycle
-            self.history_mgr[actor].feedback_vector = feedback_vector
-            # add new action information to decision information matrix of this step
-            decision_matrix[actor] = action_vector
-            # add new feedback information to feedback information matrix of this step
-            response_matrix[actor] = feedback_vector
-        # generate percepts
-        for actor in self.actors:
-            percept_vector = [None] * len(actor.percept_space)
-            for influencer in actor.inward_influence_links.keys():
-                for p_ch, i_ch, ch_type in actor.inward_influence_links[influencer]:
-                    percept_vector[p_ch] = decision_matrix[influencer][i_ch] if ch_type == 'action' else response_matrix[influencer][i_ch]
-            # update feedback_vector for current cycle
-            self.history_mgr[actor].percept_vector = percept_vector
-            percept_matrix[actor] = percept_vector
-
-        self.decision_matrix = decision_matrix
-        self.response_matrix = response_matrix
-        self.percept_matrix = percept_matrix
-
-        return self
-
-    def learn_cycle(self):
-        for actor in self.actors:
-            self.history_mgr[actor].record()
-            actor.learn(self.history_mgr[actor].history)
+        # let's return `self` to allow chained method calls
         return self
 
     def register(self, *actors):
         """
-        register actors to the helpers
+        register actors to arena
         initiate history managers for each actor
         """
         for actor in actors:
@@ -141,43 +116,50 @@ class Arena:
             self.history_mgr[actor] = helpers.HistoryManager(
                 history_maxlen=actor.history_maxlen)
 
-    def deregister(self, actors): pass
+    def deregister(self, actors):
+        # TODO: not yet implemented
+        pass
 
-    def stats(self): pass
+    def stats(self):
+        # TODO: implement a standard interface for stats
+        pass
 
 
 class Actor(abc.ABC):
+    """
+    actor of the system
+    """
 
-    def __init__(self, name=None, *args, **kwargs):
-        # save a local copy of args and kwargs
-        self.args = args
-        self.kwargs = kwargs
+    def __init__(self, name=None, history_maxlen=10):
         # naming the actor to some meaningful way
-        self.name = 'actor_{}'.format(id(self)) if name is None else name
+        self.name = 'actor:{}'.format(id(self)) if name is None else name
         # overridable maximum history length
-        self.history_maxlen = self.kwargs.get('history_maxlen', 10)
+        self.history_maxlen = history_maxlen
 
         self.externally_controlled_channels = set()
-        self.messages = []
+        self.messages = list()
 
         # inward signals
-        self.control_space = []  # a_in default control
-        self.percept_space = []  # <from second person> e_in
+        self.control_space = list()  # a_in default control
+        self.percept_space = list()  # <from second person> e_in
         # outward signals
-        self.feedback_space = []  # a_out default feedback
-        self.action_space = []  # <from second person> e_out
+        self.feedback_space = list()  # a_out default feedback
+        self.action_space = list()  # <from second person> e_out
 
         # list of control and influence links
         # structure:
-        #   *_control_links = {actor_1: {(2,2),(1,2),(0,0)}, actor_2: {...}, ...}
+        #   *_control_links = {actor_1: [(2,2),(1,2),(0,0), ...], actor_2: ...}
         self.inward_control_links = defaultdict(set)
         self.outward_control_links = defaultdict(set)
         # structure:
-        #   *_influence_links = {actor_1: {(2,2,'action'),(1,2,'feedback')}, actor_2: {...}, ...}
+        #   *_influence_links = {actor_1: [(2,2,'action'),(1,2,'feedback'), ...], actor_2: ...}
         self.inward_influence_links = defaultdict(set)
         self.outward_influence_links = defaultdict(set)
+        # user-constructor
+        self.setup()
 
     def says(self, message):
+        # messages should be updated on each 'tick'
         return True if self.messages.contains(message) else False
 
     def setup(self):
@@ -189,7 +171,7 @@ class Actor(abc.ABC):
         # env produces (feedback_space, action_space) at output, (e, None)
         return self
 
-    def is_controlling(self, actor):
+    def controlling(self, actor):
         """
         check through the control chain
         """
@@ -204,9 +186,12 @@ class Actor(abc.ABC):
         return False
 
     def controlled_by(self, controller, control_channels=[]):
+        """
+        actor is being controlled by the controller
+        """
         # the input actor (actor) must not be controlled by the current actor (self)
         # otherwise it will create a cycle in the control mechanism
-        if self.is_controlling(controller):
+        if self.controlling(controller):
             raise RuntimeError(
                 "The actor is already being controlled by the current actor.")
         # request all control channels
@@ -219,15 +204,15 @@ class Actor(abc.ABC):
         if any(ch in self.externally_controlled_channels for ch in control_channels):
             raise RuntimeError("The requested channel is already allocated.")
         # allot the requested channels
-        for c_channel in control_channels:
+        for c_ch in control_channels:
             # assumption: action-space is added to the controller not selected by the controller
-            a_channel = len(controller.action_space)
-            controller.action_space.append(self.control_space[c_channel])
+            a_ch = len(controller.action_space)
+            controller.action_space.append(self.control_space[c_ch])
             # store inward and outward links
-            self.inward_control_links[controller].add((c_channel, a_channel))
-            controller.outward_control_links[self].add((a_channel, c_channel))
+            self.inward_control_links[controller].add((c_ch, a_ch))
+            controller.outward_control_links[self].add((a_ch, c_ch))
             # mark the control channel as controlled
-            self.externally_controlled_channels.add(c_channel)
+            self.externally_controlled_channels.add(c_ch)
         # return `self` so the function calls may be chained
         return self
 
@@ -274,23 +259,23 @@ class Actor(abc.ABC):
     def act(self, history, controls):
         # pre_decision_info should "agree" with the input space
         # output space is "received" from another actors
-        return [a.random_sample() for a in self.action_space], [f.random_sample() for f in self.feedback_space]
+        return [a.random_sample() for a in self.action_space]
 
-    def state(self, history, pre_decision_info):
+    def state(self, history, controls):
         return history[-1]
 
-    def response(self, history, controls):
+    def respond(self, history, controls, actions):
         return [f.random_sample() for f in self.feedback_space]
 
-    def evaluate(self, history, pre_decision_info, decision): pass
-    # the size of returned evaluation should match pre_decision_info
-    # the return vector should be of the size of the control channels
-    # takes in complete history -> R^[size of controls]
+    def evaluate(self, history, controls, actions, feedbacks):
+        # the size of returned evaluation should match pre_decision_info
+        # the return vector should be of the size of the control channels
+        # takes in complete history -> R^[size of controls]
+        return np.zeros(len(self.control_space))
 
     def learn(self, history): pass
 
-    def render(self):
-        pass
+    def render(self): pass
 
 # there might be actors which have vector controls, like factors of action space
 # they can connect to multiple actors, where each actor controls a part of controls
@@ -360,10 +345,10 @@ if __name__ == "__main__":
 
     agent = Actor('Agent007')
     domain = Actor('Starship')
-    domain.control_space = [helpers.Sequence(range(10), 'levels'), helpers.Sequence([
+    domain.control_space = [helpers.Interval(
+        [0.0, 1.0], 'pos_x'), helpers.Interval([0.0, 1.0], 'pos_y')]
+    domain.feedback_space = [helpers.Sequence(range(10), 'levels'), helpers.Sequence([
         'low', 'moderate', 'high'], 'status')]
-    domain.feedback_space = [helpers.Naturals(), helpers.Sequence(
-        range(2)), helpers.Interval((-2.0, 2.0))]
 
     domain.controlled_by(agent)
     agent.influenced_by(domain)
@@ -378,7 +363,8 @@ if __name__ == "__main__":
     agentB = Actor('AgentB')
 
     pd = Actor('PD')
-    pd.control_space = [helpers.Naturals(), helpers.Interval(2.0)]
+    pd.control_space = [helpers.Sequence(
+        ['up', 'down']), helpers.Sequence(['left', 'right'])]
     pd.feedback_space = pd.control_space
 
     pd.controlled_by(agentA, control_channels=[0])
@@ -387,37 +373,11 @@ if __name__ == "__main__":
     agentA.influenced_by(pd, feedback_channels=[1])
     agentB.influenced_by(pd, feedback_channels=[0])
 
-    rl = Arena()
-
     rl.register(agentB, pd)
     rl.register(pd)
     rl.register(agentA)
 
-    rl.actors = ['act0', 'act1', 'act2', 'act3', 'act4']
+    for _ in range(15):
+        rl.tick()
 
-    rl.schemata(
-        pre_schema=[[0, 0, 1, 0, 1],
-                    [1, 0, 1, 0, 0],
-                    [0, 0, 0, 0, 1],
-                    [1, 1, 0, 0, 1],
-                    [0, 0, 0, 0, 0]],
-        post_schema=[[1, 0, 1, 0, 1],
-                     [1, 1, 1, 0, 0],
-                     [0, 0, 1, 0, 1],
-                     [1, 1, 0, 1, 1],
-                     [0, 0, 0, 0, 1]]
-    )
-
-    rl.schemata([[0, 0, 0, 0, 1],
-                [1, 0, 0, 0, 0],
-                [0, 0, 0, 0, 1],
-                [1, 1, 0, 0, 1],
-                [0, 0, 0, 0, 0]])
-
-    rl.tick()
-
-    # rl.schemata([[1, 1, 1, 1, 1],
-    #              [1, 0, 1, 0, 0],
-    #              [1, 0, 1, 0, 0],
-    #              [1, 1, 0, 1, 1],
-    #              [0, 0, 0, 0, 0]])
+    rl
