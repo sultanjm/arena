@@ -40,6 +40,7 @@ class HistoryManager:
         self.action_vector = []
         self.feedback_vector = []
         self.percept_vector = []
+        self.evaluation_vector = []
 
     def record(self):
         # control, action, feedback, percept
@@ -158,10 +159,11 @@ class Sequence(Space):
         super().__init__(*args, **kwargs)
         self.labels = labels
         self.len = len(self.labels)
+        self.range = range(self.len)
 
     def random_sample(self):
         # random sample is the index not the label
-        return np.random.default_rng().choice(range(self.len))
+        return np.random.default_rng().choice(self.range)
 
 
 class Interval(Space):

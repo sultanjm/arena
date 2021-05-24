@@ -1,0 +1,74 @@
+
+# there might be actors which have vector controls, like factors of action space
+# they can connect to multiple actors, where each actor controls a part of controls
+# we should allow for a continuos control inputs with some sampling function
+# important thing is to allow function approximation in the actors
+# so they can keep approximate statistics
+# Actor [a_out, e_out], [a_in, e_in]
+# why do we need a_in and e_in?
+# formally a_in and e_in can have same effect
+# the actor may use e_in as as control input
+# (a_in_1, a_in_2, a_in_3, ... , a_in_{K-1})
+# action cycle
+# [a_out, e_out] = actor.act(history, [a_in, e_in])
+# evaluation cycle
+# r = actor.evaluate([histroy [a_in, e_in] [a_out, e_out]])
+# Dims, Continuous/discrete, bounded/unbounded
+# (1, 'natural', 10)
+# (1, 'real', 1.0)
+# (1, 'natural', math.inf)
+# (1, 'real', math.inf)
+# [('real', 1.0), ('real', 1.0)] => [0.0, 1.0] x [0.0, 1.0]
+# [('natural', math.inf), ('real', 2.0)] => N x [0.0, 2.0]
+# [('natural', 4), ('natural', 2)] => {0, 1, 2, 3} x {0, 1}
+# [('real', math.inf), ('real', math.inf)] => R x R
+# it could be empty []
+
+# design choices: spaces start from zero and always closed intervals
+# the controlling agent may control a part of the control space. The rest of the controls are chosen at random.
+# Important: the fixed controls are like an actor acting on it by "choosing" a fixed control.
+# for example, if the control space is R x R, but the controlling actor is only choosing the first coordinate then the second
+# coordinate is chosen at random. It is same to say that the agent has chosen any point on the line.
+
+# let an helpers have 5 actors, e.g. [a0, a1, a2, a3, a4]
+# from a2's perspective
+# a2 is controlled by: [a0, a4] <= from pre_schema
+# a2 is influenced by: [a2, a3] <= from post_schema - pre_schema
+# a2 is independent of: [a1] <= not connected in any schemata
+
+# maybe we can use post_schema directly to get the 'influence' diagram
+# control dimensions are control channels. (one to many)
+# in an RL helpers: agent is influenced by the environment, but not controlled by it
+# the environment is controlled by the environment.
+# we can use flags
+# [1, 1, 0, 0] means a0 controls channel 0 and 1 of a2
+# [0, 0, 1, 0] means a1 controls channel 2 of a2
+# channel 3 is chosen randomly
+# a2 can decide to receive a subset of (action + feedback) channels from a2 and a3, e.g. [0,0,1] and [1,0,1,0], as percepts
+
+# history update for any actor is:
+# controls, actions, feedbacks, percepts
+# controls <= from preceding actors
+# actions => to succeeding actors
+# act cycle
+# histroy + controls --> actions (-> controls)
+# response cycle
+# history + controls + actions --> feedback (-> percepts)
+# evaluate each control at the history (dispatch to every controller)
+# learn cycle
+# history + controls + actions + feedback + percept --> history
+
+# a history update is [controls, actions, feedback, percept]
+
+# controls are coming through from another actors (controllers)
+# controls <= from preceding actors
+# actions are dispatched to other actors
+# actions => to succeeding actors
+# in act cycle:
+# histroy + controls --> actions (-> controls)
+# history + controls + actions --> feedback (-> percepts)
+# evaluate each control at the history (dispatch to every controller)
+# learn cycle:
+# history + controls + actions + feedback + percept --> history
+# a history update is [controls, actions, feedback, percept]
+# a history tuple is of len(control_space) + len(action_space) + len(feedback_space) + len(percept_space) long

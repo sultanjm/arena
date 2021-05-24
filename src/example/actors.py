@@ -1,9 +1,10 @@
 import arena
+import numpy as np
 
 
 class Agent(arena.Actor):
 
-    def setup(self):
+    def setup(self, *args, **kwargs):
         return super().setup()
 
     def act(self, history, controls):
@@ -15,8 +16,8 @@ class Agent(arena.Actor):
     def evaluate(self, history, controls, actions, feedbacks):
         return super().evaluate(history, controls, actions, feedbacks)
 
-    def learn(self, history):
-        return super().learn(history)
+    def learn(self, history, evaluations):
+        return super().learn(history, evaluations)
 
     def state(self, history, controls):
         return super().state(history, controls)
