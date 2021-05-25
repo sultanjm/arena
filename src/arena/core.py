@@ -48,9 +48,11 @@ class Arena:
             #   percept_matrix[actor]  = [action & feedback vector from percept_space]
             #   evaluation_matrix[actor]  = [evaluation vector from percept_space]
             action_matrix = defaultdict(list)
+            control_matrix = defaultdict(list)
             feedback_matrix = defaultdict(list)
             percept_matrix = defaultdict(list)
             evaluation_matrix = defaultdict(list)
+            reward_matrix = defaultdict(list)
             # go through each actor
             # assuming the actors are in order
             for actor in self.actors:
@@ -65,7 +67,7 @@ class Arena:
                     for c_ch, a_ch in actor.inward_control_links[controller]:
                         # get the action from controller to the actor
                         control_vector[c_ch] = action_matrix[controller][a_ch]
-
+                control_matrix[actor] = control_vector
                 # let the actor act on its controls and current history
                 action_vector = actor.act(
                     self.history_mgr[actor].history, control_vector)
@@ -76,20 +78,10 @@ class Arena:
                 evaluation_vector = actor.evaluate(
                     self.history_mgr[actor].history, control_vector, action_vector, feedback_vector)
 
-                # update control_vector for current step
-                self.history_mgr[actor].control_vector = control_vector
-                # update action_vector for current step
-                self.history_mgr[actor].action_vector = action_vector
-                # update feedback_vector for current step
-                self.history_mgr[actor].feedback_vector = feedback_vector
-                # update evaluation_vector for current step
-                self.history_mgr[actor].evaluation_vector = evaluation_vector
                 # add new action information to decision information matrix of this step
-
                 action_matrix[actor] = action_vector
                 # add new feedback information to feedback information matrix of this step
                 feedback_matrix[actor] = feedback_vector
-
                 evaluation_matrix[actor] = evaluation_vector
             # generate percepts
             # learn from current iteration using the information
@@ -102,15 +94,30 @@ class Arena:
                 # update feedback_vector for current cycle
                 self.history_mgr[actor].percept_vector = percept_vector
                 percept_matrix[actor] = percept_vector
-                # record the current interaction
-                self.history_mgr[actor].record()
                 # ask for
                 reward_vector = np.zeros(len(actor.action_space))
                 for controlled in actor.outward_control_links.keys():
                     for a_ch, c_ch in actor.outward_control_links[controlled]:
                         reward_vector[a_ch] = evaluation_matrix[controlled][c_ch]
-                    # learn from the history
-                actor.learn(self.history_mgr[actor].history, reward_vector)
+                reward_matrix[actor] = reward_vector
+                # learn from the interation at the history
+                next_state = actor.learn(
+                    self.history_mgr[actor].history,
+                    control_matrix[actor],
+                    action_matrix[actor],
+                    feedback_matrix[actor],
+                    percept_matrix[actor],
+                    reward_matrix[actor]
+                )
+                # record the current interaction
+                self.history_mgr[actor].record(
+                    control_matrix[actor],
+                    action_matrix[actor],
+                    feedback_matrix[actor],
+                    percept_matrix[actor]
+                )
+                # update the state
+                self.history_mgr[actor].history.state = next_state
             # done with the current step
             self.steps += 1
         # let's return `self` to allow chained method calls
@@ -132,6 +139,8 @@ class Arena:
             self.actors.append(actor)
             self.history_mgr[actor] = helpers.HistoryManager(
                 history_maxlen=actor.history_maxlen)
+            # state of empty history
+            self.history_mgr[actor].history.state = actor.reset()
 
     def deregister(self, actors):
         # TODO: not yet implemented
@@ -162,6 +171,9 @@ class Actor:
         # outward signals
         self.feedback_space = list()  # a_out default feedback
         self.action_space = list()  # <from second person> e_out
+        # internal signal
+        # internal states of the actor
+        self.state_space = [helpers.Sequence(1)]
 
         # list of control and influence links
         # structure:
@@ -174,6 +186,32 @@ class Actor:
         self.outward_influence_links = defaultdict(set)
         # user-constructor
         self.setup(*args, **kwargs)
+
+    def internal_state(self, history):
+        """
+        structural assumption:
+        the state signal is inside the history
+        a history update tuple is:
+        (controls + actions + feedbacks + percepts + state)
+        """
+        if not history.steps:
+            # initiated at the empty history
+            # start with an initial state
+            return self.reset()
+        last_step = history[-1]
+        # last_step = controls + actions + feedbacks + percepts + state
+        offset = len(self.control_space) + len(self.action_space) + \
+            len(self.feedback_space) + len(self.percept_space)
+        return last_step[offset:offset + len(self.state_space)]
+
+    # history has to have a `state`, be it the (only) default state
+    def state(self, history, controls, actions, feedbacks, percepts):
+        if not history.steps and not history.state:
+            history.state = self.reset()
+
+    def reset(self):
+        # initial internal state of the actor
+        return [s.random_sample() for s in self.state_space]
 
     def says(self, message):
         # messages should be updated on each 'tick'
@@ -287,11 +325,9 @@ class Actor:
         # takes in complete history -> R^[size of controls]
         return np.zeros(len(self.control_space))
 
-    def learn(self, history, evaluations):
-        pass
-
-    def state(self, history, controls):
-        return history[-1]
+    def learn(self, history, controls, actions, feedbacks, percepts, rewards):
+        # learn nothing, keep resetting
+        return self.reset()
 
     def render(self):
         pass

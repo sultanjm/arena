@@ -20,7 +20,7 @@ class Agent(arena.Actor):
         return super().learn(history, evaluations)
 
     def state(self, history, controls):
-        return super().state(history, controls)
+        return super().internal_state(history, controls)
 
     def render(self):
         return super().render()
