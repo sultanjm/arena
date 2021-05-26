@@ -20,6 +20,13 @@ class POMDP(core.Actor):
         # it's the actor who knows what it is and how to manipulate it
         # it should be specified and *must* be different from ``self.state_space``
 
+        # to make sure the sampled state is consistent
+        # the flag is reset in `learn()` but if arena wants
+        # to use this actor as a simulator, it needs to reset this flag
+        # manually from outside
+        self.already_sampled = False
+        self.next_state = []
+
         # TODO: only bounded spaces, so far
         for d in self.state_space + self.control_space + self.feedback_space:
             if isinstance(d, helpers.Reals) or isinstance(d, helpers.Naturals):
@@ -41,17 +48,25 @@ class POMDP(core.Actor):
         self.reward_matrix = defaultdict(list)
 
     def evaluate(self, history, controls, actions, feedbacks):
-        next_state = self.transition(history.state, controls, actions)
-        return self.reward(history.state, controls, actions, feedbacks, next_state)
+        if not self.already_sampled:
+            self.next_state = self.transition(history.state, controls, actions)
+            self.already_sampled = True
+        return self.reward(history.state, controls, actions, feedbacks, self.next_state)
 
     def learn(self, history, controls, actions, feedbacks, percepts, rewards):
         # `learn` that a tick is completed and a transition has been done
         # arena is going to update the histories, it needs to know next internal state
-        return self.transition(history.state, controls, actions)
+        if self.already_sampled:
+            self.already_sampled = False
+            return self.next_state
+        else:
+            return self.transition(history.state, controls, actions)
 
     def respond(self, history, controls, actions):
-        next_state = self.transition(history.state, controls, actions)
-        return self.emission(history.state, controls, actions, next_state)
+        if not self.already_sampled:
+            self.next_state = self.transition(history.state, controls, actions)
+            self.already_sampled = True
+        return self.emission(history.state, controls, actions, self.next_state)
 
     # state is some feature vector extracted from previous history
     # we can not handle arbitrarily deep histories anyway
@@ -67,6 +82,9 @@ class POMDP(core.Actor):
             self.transition_matrix[condition] = dist / dist.sum()
         idx = self.rng.choice(range(self.num_states),
                               p=self.transition_matrix[condition])
+        # this is a "random" sample
+        # it may be different everytime the function is called
+        # it is being called too many times already
         return list(np.unravel_index(idx, self.state_space_shape))
 
     # Overridable
@@ -79,6 +97,8 @@ class POMDP(core.Actor):
             self.emission_matrix[condition] = dist / dist.sum()
         idx = self.rng.choice(range(self.num_feedbacks),
                               p=self.emission_matrix[condition])
+        # this is a "random" sample
+        # it may be different everytime the function is called
         return list(np.unravel_index(idx, self.feedback_space_shape))
 
     # Overridable

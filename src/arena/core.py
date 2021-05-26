@@ -167,12 +167,12 @@ class Actor:
 
         # inward signals
         self.control_space = kwargs.get(
-            'control_space', list())  # a_in default control
-        self.percept_space = list()  # <from second person> e_in
+            'control_space', list())  # input actions (a_in)
+        self.percept_space = list()  # input percepts <from second person> (e_in)
         # outward signals
         self.feedback_space = kwargs.get(
-            'feedback_space', list())  # a_out default feedback
-        self.action_space = list()  # <from second person> e_out
+            'feedback_space', list())  # output actions (a_out)
+        self.action_space = list()  # output percepts <from second person> (e_out)
         # internal signal
         # internal states of the actor
         self.state_space = kwargs.get(
