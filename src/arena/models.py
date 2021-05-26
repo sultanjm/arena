@@ -1,7 +1,5 @@
 from collections import defaultdict
 
-from arena.utils import random_probability_matrix
-
 from . import core
 from . import helpers
 

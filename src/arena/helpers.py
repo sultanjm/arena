@@ -80,10 +80,16 @@ class Interval(Space):
 
 
 class Naturals(Space):
+    def __init__(self, name):
+        raise NotImplementedError
+
     def random_sample(self):
         return self.rng.geometric(0.5) - 1
 
 
 class Reals(Space):
+    def __init__(self, name):
+        raise NotImplementedError
+
     def random_sample(self):
         return self.rng.standard_gamma(1)
