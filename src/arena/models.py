@@ -30,24 +30,15 @@ class POMDP(core.Actor):
             if isinstance(d, helpers.Reals) or isinstance(d, helpers.Naturals):
                 raise RuntimeError("Only bounded spaces are supported.")
 
+        self.state_space_shape = [
+            self.state_space[idx].len for idx in range(len(self.state_space))]
+        self.num_states = np.prod(self.state_space_shape)
+        self.feedback_space_shape = [
+            self.feedback_space[idx].len for idx in range(len(self.feedback_space))]
+        self.num_feedbacks = np.prod(self.feedback_space_shape)
+
         # random number generator
         self.rng = np.random.default_rng()
-        # self.transition_matrix = kwargs.get('transition_matrix', None)
-        # if not self.transition_matrix:
-        #     self.transition_matrix = self.rng.random([
-        #         self.num_states, self.num_actions, self.num_states]) + self.min_probability  # [s][a][s_nxt]
-        #     # normalize to get a stochastic matrix
-        #     self.transition_matrix = self.transition_matrix / \
-        #         self.transition_matrix.sum(axis=-1, keepdims=True)
-        # self.reward_matrix = kwargs.get('reward_matrix', None)
-        # if not self.reward_matrix:
-        #     self.reward_matrix = self.rng.random(
-        #         [self.num_states, self.num_actions, self.num_states])  # [s][a][s_nxt]
-
-        # n1, n2, n3
-        self.total_bins = 0
-        for s in self.state_space:
-            self.total_bins += s.bins
 
         # only for random (PO)MDPs
         self.transition_matrix = defaultdict(list)
@@ -73,28 +64,36 @@ class POMDP(core.Actor):
 
     # Overridable
     def transition(self, state, controls, actions):
-        # get bin values
-        control_bins = self.binify(controls, self.control_space)
-        action_bins = self.binify(actions, self.action_space)
-        state_bins = self.binify(state, self.state_space)
-        condition = tuple(state_bins + control_bins + action_bins)
+        # assuming state, controls and actions are indices
+        condition = tuple(state + controls + actions)
+        # joint distribution
         if not self.transition_matrix[condition]:
-
-            # choose a random but fixed function here
-        return self.reset()
+            dist = self.rng.random(self.num_states) + self.min_probability
+            self.transition_matrix[condition] = dist / dist.sum()
+        idx = self.rng.choice(range(self.num_states),
+                              p=self.transition_matrix[condition])
+        return np.unravel_index(idx, self.state_space_shape)
 
     # Overridable
     def emission(self, state, controls, actions, next_state):
-        # pick a fixed but random function here
-        return [f.random_sample() for f in self.feedback_space]
+        # assuming state, controls, actions and next_state are indices
+        condition = tuple(state + controls + actions + next_state)
+        # joint distribution
+        if not self.emission_matrix[condition]:
+            dist = self.rng.random(self.num_feedbacks)
+            self.emission_matrix[condition] = dist / dist.sum()
+        idx = self.rng.choice(range(self.num_feedbacks),
+                              p=self.emission_matrix[condition])
+        return np.unravel_index(idx, self.feedback_space_shape)
 
     # Overridable
     def reward(self, state, controls, actions, next_state, feedbacks):
-        # choose a random but fixed function here
-        return np.zeros(len(self.control_space))
-
-    def binify(self, values, space):
-        return [space[idx].bin(values[idx]) for idx in range(len(space))]
+        # assuming state, controls, actions, next_state and feedbacks are indices
+        condition = tuple(state + controls + actions + next_state + feedbacks)
+        if not self.reward_matrix[condition]:
+            self.reward_matrix[condition] = self.rng.random(
+                len(self.control_space))
+        return self.reward_matrix[condition]
 
 
 class MDP(POMDP):
