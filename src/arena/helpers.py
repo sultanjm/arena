@@ -12,20 +12,20 @@ class History(collections.deque):
     steps: actual number of steps
     state: current internal state corresponds to the complete history
     """
-    __slots__ = 'steps', 'state'
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.steps = 0
+        self.state = []
 
 
 class HistoryManager:
 
     def __init__(self, *args, **kwargs):
-        self.history_maxlen = self.kwargs.get('history_maxlen', None)
-        self.listeners = collections.defaultdict(set)
-
+        self.history_maxlen = kwargs.get('history_maxlen', 10)
         # dynamic queue (default length: None:maxlen)
-        self.history = History(self.kwargs.get(
+        self.history = History(kwargs.get(
             'history', list()), self.history_maxlen)
-        if not self.history.steps:
-            self.history.steps = 0  # steps of history
 
     def record(self, controls, actions, feedbacks, percepts):
         # control, action, feedback, percept
@@ -75,7 +75,8 @@ class Interval(Space):
         self.len = len(self.labels)
 
     def random_sample(self):
-        return self.rng.uniform(self.min, self.max)
+        return self.rng.choice(range(self.len))
+        # return self.rng.uniform(self.min, self.max)
 
 
 class Naturals(Space):

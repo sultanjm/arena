@@ -15,15 +15,10 @@ class POMDP(core.Actor):
         # any non-zero value is sufficient for an ergodic MDP
         self.min_probability = kwargs.get('min_probability', 1e-9)
         # control and feedback spaces are "action" and "state" spaces
-        self.control_space = [helpers.Sequence(range(2))] if not kwargs.get(
-            'control_space', None) else kwargs.get('control_space', None)
-        self.state_space = [helpers.Sequence(range(2))] if not kwargs.get(
-            'state_space', None) else kwargs.get('state_space', None)
         # state-space is internal to the actor
         # outside world should not worry about this space
         # it's the actor who knows what it is and how to manipulate it
         # it should be specified and *must* be different from ``self.state_space``
-        self.feedback_space = kwargs.get('feedback_space', self.state_space)
 
         # TODO: only bounded spaces, so far
         for d in self.state_space + self.control_space + self.feedback_space:
@@ -67,24 +62,24 @@ class POMDP(core.Actor):
         # assuming state, controls and actions are indices
         condition = tuple(state + controls + actions)
         # joint distribution
-        if not self.transition_matrix[condition]:
+        if not len(self.transition_matrix[condition]):
             dist = self.rng.random(self.num_states) + self.min_probability
             self.transition_matrix[condition] = dist / dist.sum()
         idx = self.rng.choice(range(self.num_states),
                               p=self.transition_matrix[condition])
-        return np.unravel_index(idx, self.state_space_shape)
+        return list(np.unravel_index(idx, self.state_space_shape))
 
     # Overridable
     def emission(self, state, controls, actions, next_state):
         # assuming state, controls, actions and next_state are indices
         condition = tuple(state + controls + actions + next_state)
         # joint distribution
-        if not self.emission_matrix[condition]:
+        if not len(self.emission_matrix[condition]):
             dist = self.rng.random(self.num_feedbacks)
             self.emission_matrix[condition] = dist / dist.sum()
         idx = self.rng.choice(range(self.num_feedbacks),
                               p=self.emission_matrix[condition])
-        return np.unravel_index(idx, self.feedback_space_shape)
+        return list(np.unravel_index(idx, self.feedback_space_shape))
 
     # Overridable
     def reward(self, state, controls, actions, next_state, feedbacks):

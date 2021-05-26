@@ -166,14 +166,17 @@ class Actor:
         self.messages = list()
 
         # inward signals
-        self.control_space = list()  # a_in default control
+        self.control_space = kwargs.get(
+            'control_space', list())  # a_in default control
         self.percept_space = list()  # <from second person> e_in
         # outward signals
-        self.feedback_space = list()  # a_out default feedback
+        self.feedback_space = kwargs.get(
+            'feedback_space', list())  # a_out default feedback
         self.action_space = list()  # <from second person> e_out
         # internal signal
         # internal states of the actor
-        self.state_space = [helpers.Sequence(1)]
+        self.state_space = kwargs.get(
+            'state_space', list())
 
         # list of control and influence links
         # structure:
