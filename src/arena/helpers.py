@@ -34,9 +34,86 @@ class HistoryManager:
         return self
 
 
-class Space(abc.ABC):
+# Space(
+#   Sequence(),
+#   Interval()
+# )
+#
+# global step resolution
+# space = Space([],range(1),(0.0,1.0,1e-6),labels=['x','y','z'])
+
+# idx = space.random_sample()['index']
+# label = space.random_sample()['label']
+# label = space.label(idx)
+# idx = space.index(label)
+# ur_idx = space.unravel(idx)
+# idx = space.ravel(ur_idx)
+
+class Space:
+    def __init__(self, *axes, labels=None, name=None, step_size=1e-6):
+        self.name = f"space:{id(self)}" if not name else name
+        self.step_size = step_size
+        self.rng = np.random.default_rng()
+        self.axes = []
+        self.types = []
+        self.labels = []
+        self.shape = []
+        self.size = 0
+        self.add(*axes, labels=labels)
+
+    def add(self, *axes, labels=None):
+        for idx, axis in enumerate(axes):
+            if not isinstance(axis, collections.Iterable):
+                raise RuntimeError(f"{axis} not a a valid axis.")
+            type = 'sequence'
+            if isinstance(axis, tuple):
+                # interval
+                type = 'interval'
+                if len(axis) < 3:
+                    # no step size provided, use default
+                    axis = tuple(list(axis) + [self.step_size])
+            label = f"axis:{len(self.axes)}" if not labels else labels[idx]
+            self.axes.append(axis)
+            self.labels.append(label)
+            self.types.append(type)
+        self.calculate_shape()
+
+    def calculate_shape(self):
+        self.shape = [None] * len(self.axes)
+        for idx, axis in enumerate(self.axes):
+            if self.types[idx] == 'interval':
+                self.shape[idx] = int(
+                    np.ceil((max(axis[0:2])-min(axis[0:2]))/axis[2]))
+            else:
+                self.shape[idx] = len(axis)
+        self.size = int(np.prod(self.shape))
+
+    def remove(self, *indices):
+        raise NotImplementedError
+
+    # retruns the index
+    def random_sample(self):
+        return self.unravel(self.rng.choice(range(self.size)))
+
+    def label(self, indices):
+        lbl = []
+        for idx, value in enumerate(indices):
+            if self.types[idx] == 'interval':
+                lbl.append(min(self.axes[idx][0:2]) + value*self.axes[idx][2])
+            else:
+                lbl.append(self.axes[idx][value])
+        return lbl
+
+    def ravel(self, ur_idx):
+        return np.ravel_multi_index(ur_idx, self.shape)
+
+    def unravel(self, idx):
+        return np.unravel_index(idx, self.shape)
+
+
+class Dimension(abc.ABC):
     def __init__(self, name=None):
-        self.name = 'id:{}'.format(id(self)) if name is None else name
+        self.name = 'dimension:{}'.format(id(self)) if name is None else name
         self.rng = np.random.default_rng()
 
     @abc.abstractmethod
@@ -53,7 +130,7 @@ class Space(abc.ABC):
 # Sequence(['okay', 'danger'], 'status')
 
 
-class Sequence(Space):
+class Sequence(Dimension):
     def __init__(self, labels=[], *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.labels = labels
@@ -64,7 +141,7 @@ class Sequence(Space):
         return self.rng.choice(range(self.len))
 
 
-class Interval(Space):
+class Interval(Dimension):
     def __init__(self, range=(0.0, 1.0), resolution=1e-2, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.min = min(range)
@@ -79,7 +156,7 @@ class Interval(Space):
         # return self.rng.uniform(self.min, self.max)
 
 
-class Naturals(Space):
+class Naturals(Dimension):
     def __init__(self, name):
         raise NotImplementedError
 
@@ -87,7 +164,7 @@ class Naturals(Space):
         return self.rng.geometric(0.5) - 1
 
 
-class Reals(Space):
+class Reals(Dimension):
     def __init__(self, name):
         raise NotImplementedError
 
