@@ -1,12 +1,24 @@
 import arena
+from arena.helpers import Category
 import example
 
 import numpy as np
 
-space = arena.Space([0, 1, 2], range(4), (0.0, 1.0, 1e-1),
-                    (-2.0, -3.0, 1e-1), labels=['x', 'y', 'z', 'k'], name='outer-space')
-x = space.random_sample()
-y = space.label(x)
+from arena import Continuous, Discrete, Category
+
+space = [
+    Category(['up', 'down', 'left', 'right'], 'x'),
+    Discrete(4, 7, 'y'),
+    Continuous(-np.inf, 3.0, 'z'),
+    Continuous(np.inf, -np.inf, 'k'),
+    Discrete(np.inf, 5.8),
+    Discrete(-np.inf, -9, step=3.16889),
+    Discrete(-np.inf, np.inf)
+]
+
+x = [a.sample() for a in space]
+y = [a.sample() for a in space]
+
 grl = arena.Arena('grl-arena')
 
 agent = arena.Actor('agent')

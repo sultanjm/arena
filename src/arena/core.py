@@ -24,7 +24,7 @@ class Arena:
 
     def __init__(self, name=None, *args, **kwargs):
         # name the arena
-        self.name = 'arena:{}'.format(id(self)) if name is None else name
+        self.name = f"arena:{id(self)}" if not name else name
         # list of actors in order
         self.actors = list()
         # list of history managers for every actor

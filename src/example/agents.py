@@ -1,5 +1,3 @@
-from numpy.core.fromnumeric import argmax
-from numpy.lib.function_base import average
 import arena
 import numpy as np
 

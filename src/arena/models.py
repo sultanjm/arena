@@ -25,10 +25,11 @@ class POMDP(core.Actor):
         self.already_sampled = False
         self.next_state = []
 
-        # TODO: only bounded spaces, so far
-        for d in self.state_space + self.control_space + self.feedback_space:
-            if isinstance(d, helpers.Reals) or isinstance(d, helpers.Naturals):
-                raise RuntimeError("Only bounded spaces are supported.")
+        # TODO: only discrete state, control and action spaces, so far
+        for d in self.state_space + self.control_space + self.action_space:
+            if isinstance(d, helpers.Continuous):
+                raise RuntimeError(
+                    "Only discrete state, control and action spaces are supported.")
 
         self.state_space_shape = [
             self.state_space[idx].len for idx in range(len(self.state_space))]
@@ -70,7 +71,32 @@ class POMDP(core.Actor):
     # we can not handle arbitrarily deep histories anyway
     # there seems to be a connection between the transition function and abstraction map
 
+    # Important! transition, emission, and reward are the spots to
+    # add general functions
+    # usually the prediction is deterministic (or sampled)
+    # D(Y) = f(X), and y ~ P(Y)
+    # Y = [Y0, Y1, ..., Yn]
+    # D(Y) = [D(Y0), D(Y1), ..., D(Yn-1)]
+    # D(Y0), D(Y1|Y0), D(Y2|Y0, Y1), ..., D(Yn-1|Y0, Y1, ..., Yn-2)
+    #
+    # x -> N0 -> D(Y0) ~ y0
+    # x,y0 -> N1 -> D(Y1) ~ y1
+    # x,y0,y1 -> N3 -> D(Y2) ~ y2
+    # ...
+    # x,y0,y1,...,yn-2 -> Nn -> D(Yn-1) ~ yn-1
+    #
+    # 'bounded', 'left-bounded', 'right-bounded', 'unbounded'
+    #
+    # BOUNDED, LEFT_BOUNDED, RIGHT_BOUNDED, UNBOUNDED
+    #
+    # Discreet(0, 2, name='axis', step=1)
+    # Sequence([0,1,2], name='axis')
+    # g(f(X), W) = y(W)
+    # E[g o f | X] = y(X) [expected outcome]
+    #
+
     # Overridable
+
     def transition(self, state, controls, actions):
         # assuming state, controls and actions are indices
         condition = tuple(state + controls + actions)
@@ -78,12 +104,12 @@ class POMDP(core.Actor):
         if not len(self.transition_matrix[condition]):
             dist = self.rng.random(self.num_states) + self.min_probability
             self.transition_matrix[condition] = dist / dist.sum()
-        idx = self.rng.choice(range(self.num_states),
-                              p=self.transition_matrix[condition])
+        next_state = self.rng.choice(range(self.num_states),
+                                     p=self.transition_matrix[condition])
         # this is a "random" sample
         # it may be different everytime the function is called
         # it is being called too many times already
-        return list(np.unravel_index(idx, self.state_space_shape))
+        return next_state
 
     # Overridable
     def emission(self, state, controls, actions, next_state):
