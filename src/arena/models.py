@@ -29,7 +29,7 @@ class POMDP(core.Actor):
         for d in self.state_space + self.control_space + self.action_space:
             if isinstance(d, helpers.Continuous):
                 raise RuntimeError(
-                    "Only discrete state, control and action spaces are supported.")
+                    "Only discrete state, control, and action spaces are supported.")
 
         self.state_space_shape = [
             self.state_space[idx].len for idx in range(len(self.state_space))]
@@ -66,6 +66,25 @@ class POMDP(core.Actor):
             self.next_state = self.transition(history.state, controls, actions)
             self.already_sampled = True
         return self.emission(history.state, controls, actions, self.next_state)
+
+    # w0, w1, ..., wn-1
+    # g_w(x) = w0 * f0(x) + w1 * f1(x) + ...
+    # take fi as fourier series
+    # f0(x1:n-1, xn) = average
+    # f1(x1:n-1, xn) =
+    # x in Rn
+    # last layer forces categories
+
+    # nxt_s ~ P(S) = transition(s,c,a)
+    # nxt_e ~ P(E) = emission(s,c,a,nxt_s)
+    # nxt_r ~ P(R) = reward(s,c,a,nxt_s)
+
+    # set of parameters of categories, discrete and continuous intervals (bounded or otherwise).
+    # inputs are Rn where n = dim(S) + dim(C) + dim(A) + dim(S)
+    # Params of P(S) = [{n-1 category} {bounded dist} {unbounded dist}]
+    # last "interface layer" = [id, id, ceil, floor, round, abs]
+
+    # nxt_r ~ reward(s,c,a,nxt_s,nxt_e) : we can safely ignore nxt_e --- reward(s,c,a,nxt_s)
 
     # state is some feature vector extracted from previous history
     # we can not handle arbitrarily deep histories anyway
