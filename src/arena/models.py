@@ -69,7 +69,11 @@ class POMDP(core.Actor):
 
     # w0, w1, ..., wn-1
     # g_w(x) = w0 * f0(x) + w1 * f1(x) + ...
-    # take fi as fourier series
+    # take fi as fourier features
+    # g_w(nxt_s | s,c,a) = w0(s,c,a) * f0(nxt_s) + w1(s,c,a) * f1(nxt_s) + ...
+    # lets ask for first N dominant modes from a nn
+    # s,c,a => {(n,w)_i | i is one of the first N dominant modes}
+    # it could be (frequency, amp_sine, amp_cosine) tuple
     # f0(x1:n-1, xn) = average
     # f1(x1:n-1, xn) =
     # x in Rn

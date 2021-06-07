@@ -57,7 +57,7 @@ class Arena:
             # assuming the actors are in order
             for actor in self.actors:
                 # generate a "random" control vector just in case nobody is controling
-                control_vector = [c.random_sample()
+                control_vector = [c.sample()
                                   for c in actor.control_space]
                 # check the links
                 # if the actor is being controlled
@@ -86,7 +86,7 @@ class Arena:
             # generate percepts
             # learn from current iteration using the information
             for actor in self.actors:
-                percept_vector = [p.random_sample()
+                percept_vector = [p.sample()
                                   for p in actor.percept_space]
                 for influencer in actor.inward_influence_links.keys():
                     for p_ch, i_ch, ch_type in actor.inward_influence_links[influencer]:
